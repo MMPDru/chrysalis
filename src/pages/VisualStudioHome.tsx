@@ -600,8 +600,11 @@ const VisualStudioHome = () => {
                     <div className="card" style={{ padding: '1.5rem' }}>
                         <h4 style={{ marginBottom: '1rem', fontSize: '0.8rem', color: '#999', textTransform: 'uppercase' }}>Chapters</h4>
                         <button
+                            type="button"
                             onClick={() => {
+                                console.log('All Chapters clicked');
                                 setSelectedChapterId('');
+                                setActiveChapter(null);
                                 setGalleryFilter('all');
                             }}
                             className="btn"
@@ -610,7 +613,8 @@ const VisualStudioHome = () => {
                                 justifyContent: 'flex-start',
                                 background: !selectedChapterId || galleryFilter === 'all' ? 'var(--color-primary)' : 'transparent',
                                 color: !selectedChapterId || galleryFilter === 'all' ? 'white' : 'inherit',
-                                marginBottom: '0.5rem'
+                                marginBottom: '0.5rem',
+                                cursor: 'pointer'
                             }}
                         >
                             + All Chapters
@@ -618,8 +622,11 @@ const VisualStudioHome = () => {
                         {chapters.map(c => (
                             <button
                                 key={c.id}
+                                type="button"
                                 onClick={() => {
+                                    console.log('Chapter clicked:', c.id, c.title);
                                     setSelectedChapterId(c.id);
+                                    setActiveChapter(c);
                                     if (view === 'gallery') setGalleryFilter(c.id);
                                 }}
                                 className="btn"
@@ -629,7 +636,8 @@ const VisualStudioHome = () => {
                                     background: selectedChapterId === c.id ? 'var(--color-hover)' : 'transparent',
                                     marginBottom: '0.5rem',
                                     fontSize: '0.9rem',
-                                    paddingRight: '0.75rem'
+                                    paddingRight: '0.75rem',
+                                    cursor: 'pointer'
                                 }}
                             >
                                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

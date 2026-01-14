@@ -1,19 +1,36 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LogIn, UserPlus, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isFirebaseConfigured } from '../lib/firebase';
 
 const LoginPage = () => {
+    const navigate = useNavigate();
     const [isSignup, setIsSignup] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [displayName, setDisplayName] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const { login, signup } = useAuth();
+    const { login, signup, currentUser } = useAuth();
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    // Redirect if already logged in
+    useEffect(() => {
+        if (currentUser) {
+            navigate('/');
+        }
+    }, [currentUser, navigate]);
+
+    const handleSubmit = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+
+        console.log('handleSubmit called', { email, password });
+
+        if (!email || !password) {
+            setError('Please enter email and password');
+            return;
+        }
+
         setError('');
         setLoading(true);
 
@@ -24,11 +41,12 @@ const LoginPage = () => {
                 }
                 await signup(email, password, displayName);
             } else {
+                console.log('Calling login...');
                 await login(email, password);
+                console.log('Login successful');
             }
         } catch (err: any) {
             console.error('Login error:', err);
-            // Parse Firebase error codes to user-friendly messages
             let message = err.message || 'An error occurred';
             if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
                 message = 'Invalid email or password. Please try again.';
