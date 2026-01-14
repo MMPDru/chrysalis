@@ -1,6 +1,6 @@
 
 import { useState } from 'react';
-import { Sparkles, Copy, RefreshCcw, Save, Trash2, Clock, Wand2, Loader2, Check } from 'lucide-react';
+import { Sparkles, Copy, Save, Trash2, Wand2, Loader2 } from 'lucide-react';
 import { generateTikTokScript } from '../../lib/gemini';
 import { saveTikTokScript } from '../../lib/tiktok';
 import { useAuth } from '../../contexts/AuthContext';

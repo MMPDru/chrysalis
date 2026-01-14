@@ -1,6 +1,6 @@
 
 import { useState } from 'react';
-import { Sparkles, RefreshCcw, Check, Plus, Loader2 } from 'lucide-react';
+import { Sparkles, Check, Plus, Loader2 } from 'lucide-react';
 import { generateChapterTitles } from '../../lib/gemini';
 import { updateChapterTitle } from '../../lib/chapters';
 

@@ -1,5 +1,5 @@
 
-import { collection, doc, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { collection, doc, addDoc, query, where, onSnapshot, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import type { TikTokScript } from './types';
 
@@ -17,8 +17,7 @@ export const deleteTikTokScript = async (id: string) => {
 export const subscribeToTikTokScripts = (userId: string, callback: (scripts: TikTokScript[]) => void) => {
     const q = query(
         collection(db, 'tiktokScripts'),
-        where('userId', '==', userId),
-        orderBy('createdAt', 'desc')
+        where('userId', '==', userId)
     );
 
     return onSnapshot(q, (snapshot) => {
@@ -26,6 +25,15 @@ export const subscribeToTikTokScripts = (userId: string, callback: (scripts: Tik
             id: doc.id,
             ...doc.data()
         })) as TikTokScript[];
+        // Sort client-side to avoid requiring Firestore index
+        scripts.sort((a, b) => {
+            const aTime = a.createdAt?.seconds || 0;
+            const bTime = b.createdAt?.seconds || 0;
+            return bTime - aTime;
+        });
         callback(scripts);
+    }, (error) => {
+        console.error('Error subscribing to TikTok scripts:', error);
+        callback([]);
     });
 };

@@ -1,9 +1,9 @@
 import { NavLink } from 'react-router-dom';
 import {
     LayoutDashboard,
-    BookOpen,
     Library,
     Image as ImageIcon,
+    Share2,
     Download,
     Settings as SettingsIcon
 } from 'lucide-react';
@@ -11,9 +11,9 @@ import {
 const Sidebar = () => {
     const navItems = [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-        { icon: BookOpen, label: 'Chapters', path: '/chapters' },
         { icon: Library, label: 'Wisdom Library', path: '/library' },
         { icon: ImageIcon, label: 'Visual Studio', path: '/studio' },
+        { icon: Share2, label: 'Social Media', path: '/social-media' },
         { icon: Download, label: 'Export Center', path: '/export' },
         { icon: SettingsIcon, label: 'Settings', path: '/settings' },
     ];

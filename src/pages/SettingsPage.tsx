@@ -202,6 +202,7 @@ const SettingsPage = () => {
                     This action will sign you out of your account.
                 </p>
                 <button
+                    type="button"
                     onClick={handleLogout}
                     style={{
                         padding: '0.75rem 1.5rem',
@@ -212,7 +213,8 @@ const SettingsPage = () => {
                         fontWeight: 600,
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '0.5rem'
+                        gap: '0.5rem',
+                        cursor: 'pointer'
                     }}
                 >
                     <LogOut size={20} />

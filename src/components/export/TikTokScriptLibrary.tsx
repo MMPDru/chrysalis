@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { subscribeToTikTokScripts, deleteTikTokScript } from '../../lib/tiktok';
 import type { TikTokScript } from '../../lib/types';
-import { Copy, Trash2, Search, Clock, FileText } from 'lucide-react';
+import { Copy, Trash2, Search, FileText } from 'lucide-react';
 
 const TikTokScriptLibrary = () => {
     const { currentUser } = useAuth();

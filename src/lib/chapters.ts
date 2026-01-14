@@ -2,7 +2,6 @@ import {
     collection,
     query,
     where,
-    orderBy,
     onSnapshot,
     addDoc,
     updateDoc,
@@ -20,8 +19,7 @@ import type { Chapter, Version } from './types';
 export const subscribeToChapters = (userId: string, callback: (chapters: Chapter[]) => void) => {
     const q = query(
         collection(db, 'chapters'),
-        where('userId', '==', userId),
-        orderBy('chapterNumber', 'asc')
+        where('userId', '==', userId)
     );
 
     return onSnapshot(q, (snapshot) => {
@@ -29,7 +27,12 @@ export const subscribeToChapters = (userId: string, callback: (chapters: Chapter
             id: doc.id,
             ...doc.data()
         })) as Chapter[];
+        // Sort client-side to avoid requiring Firestore index
+        chapters.sort((a, b) => (a.chapterNumber || 0) - (b.chapterNumber || 0));
         callback(chapters);
+    }, (error) => {
+        console.error('Error subscribing to chapters:', error);
+        callback([]);
     });
 };
 
@@ -175,8 +178,7 @@ export const updateChapterTitle = async (chapterId: string, title: string) => {
 export const subscribeToVersions = (chapterId: string, callback: (versions: Version[]) => void) => {
     const q = query(
         collection(db, 'versions'),
-        where('chapterId', '==', chapterId),
-        orderBy('versionNumber', 'desc')
+        where('chapterId', '==', chapterId)
     );
 
     return onSnapshot(q, (snapshot) => {
@@ -184,7 +186,12 @@ export const subscribeToVersions = (chapterId: string, callback: (versions: Vers
             id: doc.id,
             ...doc.data()
         })) as Version[];
+        // Sort client-side to avoid requiring Firestore index
+        versions.sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0));
         callback(versions);
+    }, (error) => {
+        console.error('Error subscribing to versions:', error);
+        callback([]);
     });
 };
 
@@ -224,9 +231,11 @@ export const createNewVersion = async (chapterId: string, userId: string, conten
     const chapterRef = doc(db, 'chapters', chapterId);
 
     // Get latest version number
-    const q = query(collection(db, 'versions'), where('chapterId', '==', chapterId), orderBy('versionNumber', 'desc'), limit(1));
+    // Get all versions and find the highest number client-side to avoid index requirement
+    const q = query(collection(db, 'versions'), where('chapterId', '==', chapterId));
     const snapshot = await getDocs(q);
-    const lastVersionNumber = snapshot.empty ? 0 : (snapshot.docs[0].data() as Version).versionNumber;
+    const versions = snapshot.docs.map(d => d.data() as Version);
+    const lastVersionNumber = versions.reduce((max, v) => Math.max(max, v.versionNumber || 0), 0);
 
     const batch = writeBatch(db);
 

@@ -1,0 +1,28 @@
+{
+    "hosting": {
+        "public": "dist",
+        "ignore": [
+            "firebase.json",
+            "**/.*",
+            "**/node_modules/**"
+        ],
+        "rewrites": [
+            {
+                "source": "/api/generateImage",
+                "function": "generateImage"
+            },
+            {
+                "source": "/api/generateVideo",
+                "function": "generateVideo"
+            },
+            {
+                "source": "**",
+                "destination": "/index.html"
+            }
+        ]
+    },
+    "functions": {
+        "source": "functions",
+        "runtime": "nodejs18"
+    }
+}

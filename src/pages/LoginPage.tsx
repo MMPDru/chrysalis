@@ -27,7 +27,19 @@ const LoginPage = () => {
                 await login(email, password);
             }
         } catch (err: any) {
-            setError(err.message || 'An error occurred');
+            console.error('Login error:', err);
+            // Parse Firebase error codes to user-friendly messages
+            let message = err.message || 'An error occurred';
+            if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+                message = 'Invalid email or password. Please try again.';
+            } else if (err.code === 'auth/user-not-found') {
+                message = 'No account found with this email. Please sign up.';
+            } else if (err.code === 'auth/too-many-requests') {
+                message = 'Too many failed attempts. Please try again later.';
+            } else if (err.code === 'auth/invalid-email') {
+                message = 'Please enter a valid email address.';
+            }
+            setError(message);
         } finally {
             setLoading(false);
         }

@@ -3,7 +3,6 @@ import {
     collection,
     query,
     where,
-    orderBy,
     onSnapshot,
     addDoc,
     deleteDoc,
@@ -17,8 +16,7 @@ import type { WisdomVideo } from './types';
 export const subscribeToLibrary = (userId: string, callback: (videos: WisdomVideo[]) => void) => {
     const q = query(
         collection(db, 'wisdomLibrary'),
-        where('userId', '==', userId),
-        orderBy('savedAt', 'desc')
+        where('userId', '==', userId)
     );
 
     return onSnapshot(q, (snapshot) => {
@@ -26,7 +24,16 @@ export const subscribeToLibrary = (userId: string, callback: (videos: WisdomVide
             id: doc.id,
             ...doc.data()
         })) as WisdomVideo[];
+        // Sort client-side to avoid requiring Firestore index
+        videos.sort((a, b) => {
+            const aTime = a.savedAt?.seconds || 0;
+            const bTime = b.savedAt?.seconds || 0;
+            return bTime - aTime;
+        });
         callback(videos);
+    }, (error) => {
+        console.error('Error subscribing to library:', error);
+        callback([]);
     });
 };
 
