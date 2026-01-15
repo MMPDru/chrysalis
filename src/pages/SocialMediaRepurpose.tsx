@@ -88,7 +88,7 @@ interface GenerationHistory {
     // For retry/polling functionality
     payload?: Record<string, any>;
     retryCount?: number;
-    lastPollTime?: Date;
+    lastRetryTime?: Date;
 }
 
 // Response parsers - Handle n8n markdown-formatted output
@@ -890,10 +890,16 @@ const SocialMediaRepurpose = () => {
 
         const type = historyItem.type;
 
-        // Update history item status to show retrying
+        // Update history item status to show retrying with timestamp
         setHistory(prev => prev.map(h =>
             h.id === historyItem.id
-                ? { ...h, status: 'pending' as const, errorMessage: undefined, retryCount: (h.retryCount || 0) + 1 }
+                ? {
+                    ...h,
+                    status: 'pending' as const,
+                    errorMessage: undefined,
+                    retryCount: (h.retryCount || 0) + 1,
+                    lastRetryTime: new Date()
+                }
                 : h
         ));
 
@@ -1898,10 +1904,10 @@ const SocialMediaRepurpose = () => {
                                             {item.chapterTitle}
                                         </div>
                                         <div style={{ fontSize: '0.7rem', color: '#999' }}>
-                                            {item.timestamp.toLocaleTimeString()}
+                                            Started: {item.timestamp.toLocaleTimeString()}
                                             {item.retryCount && item.retryCount > 0 && (
                                                 <span style={{ marginLeft: '0.5rem', color: '#f59e0b' }}>
-                                                    (retry #{item.retryCount})
+                                                    • Retry #{item.retryCount} at {item.lastRetryTime?.toLocaleTimeString() || 'unknown'}
                                                 </span>
                                             )}
                                         </div>
