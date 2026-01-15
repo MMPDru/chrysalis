@@ -246,11 +246,19 @@ const VisualStudioHome = () => {
 
     // Handle image actions
     const handleSetAsThumbnail = async (asset: VisualAsset) => {
+        if (!asset.chapterId) {
+            alert('This asset is not associated with a chapter.');
+            return;
+        }
         await setAsChapterThumbnail(asset.chapterId, asset.url);
         await setImageType(asset.id, 'thumbnail');
     };
 
     const handleSetAsHeader = async (asset: VisualAsset) => {
+        if (!asset.chapterId) {
+            alert('This asset is not associated with a chapter.');
+            return;
+        }
         await setAsChapterHeader(asset.chapterId, asset.url);
         await setImageType(asset.id, 'header');
     };

@@ -17,10 +17,12 @@ import {
     Linkedin,
     Facebook,
     Instagram,
-    Youtube
+    Youtube,
+    Save
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { subscribeToChapters, fetchLatestVersion } from '../lib/chapters';
+import { saveGeneratedVideo } from '../lib/visuals';
 import type { Chapter } from '../lib/types';
 
 // N8N Webhook Configuration
@@ -487,6 +489,10 @@ const SocialMediaRepurpose = () => {
     // Copy state
     const [copiedId, setCopiedId] = useState<string | null>(null);
 
+    // Video save state
+    const [isSavingVideo, setIsSavingVideo] = useState(false);
+    const [videoSavedId, setVideoSavedId] = useState<string | null>(null);
+
     // Persist results to localStorage when they change
     useEffect(() => {
         try {
@@ -813,6 +819,49 @@ const SocialMediaRepurpose = () => {
         await navigator.clipboard.writeText(text);
         setCopiedId(id);
         setTimeout(() => setCopiedId(null), 2000);
+    };
+
+    // Save video to Firebase library
+    const handleSaveVideoToLibrary = async () => {
+        if (!videoResults?.videoUrl || !currentUser) {
+            console.error('No video URL or user to save');
+            return;
+        }
+
+        setIsSavingVideo(true);
+
+        try {
+            const { id, url } = await saveGeneratedVideo(
+                currentUser.uid,
+                selectedChapterId || null,
+                videoResults.videoUrl,
+                'social-media',
+                {
+                    title: selectedChapter?.title
+                        ? `${selectedChapter.title} - Social Media Video`
+                        : 'Generated Video',
+                    prompt: videoResults.videoPrompt,
+                    platforms: videoResults.posts as Record<string, string>
+                }
+            );
+
+            console.log('Video saved to library:', id, url);
+
+            // Update the video URL to the permanent Firebase URL if it changed
+            if (url !== videoResults.videoUrl) {
+                setVideoResults(prev => prev ? { ...prev, videoUrl: url } : null);
+            }
+
+            // Show success state
+            setVideoSavedId(id);
+            setTimeout(() => setVideoSavedId(null), 3000);
+
+        } catch (error) {
+            console.error('Failed to save video:', error);
+            alert('Failed to save video to library. Check console for details.');
+        } finally {
+            setIsSavingVideo(false);
+        }
     };
 
     // Retry a failed/pending request from history
@@ -1647,6 +1696,39 @@ const SocialMediaRepurpose = () => {
                                                 >
                                                     <Download size={14} /> Download Video
                                                 </a>
+                                                <button
+                                                    onClick={handleSaveVideoToLibrary}
+                                                    disabled={isSavingVideo || !!videoSavedId}
+                                                    className="btn btn-primary"
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '0.5rem',
+                                                        fontSize: '0.8rem',
+                                                        gap: '0.4rem',
+                                                        background: videoSavedId
+                                                            ? '#10b981'
+                                                            : isSavingVideo
+                                                                ? '#9ca3af'
+                                                                : undefined
+                                                    }}
+                                                >
+                                                    {isSavingVideo ? (
+                                                        <>
+                                                            <Loader2 size={14} className="animate-spin" />
+                                                            Saving...
+                                                        </>
+                                                    ) : videoSavedId ? (
+                                                        <>
+                                                            <Check size={14} />
+                                                            Saved to Library!
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Save size={14} />
+                                                            Save to Library
+                                                        </>
+                                                    )}
+                                                </button>
                                             </div>
                                         </div>
                                     )}
