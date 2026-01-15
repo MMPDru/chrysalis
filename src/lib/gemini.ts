@@ -9,7 +9,7 @@ export const processBrainDump = async (content: string) => {
         return content; // Mock: return original content if no API key
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     The following is a raw "brain dump" for a memoir. 
     Please reorganize it into coherent, well-structured paragraphs while maintaining the author's original voice and emotional depth. 
@@ -35,7 +35,7 @@ export const generateWritingPrompts = async (chapterContext: string) => {
         ];
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Based on the following memoir chapter context, generate 3 deep, reflective writing prompts to help the author expand their story.
     
@@ -78,7 +78,7 @@ export const analyzeWisdomVideo = async (transcript: string) => {
         };
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Analyze the following video transcript. Extract a 2-sentence summary, 3 key lessons, and any references to butterflies, caterpillars, or transformation.
     
@@ -110,7 +110,7 @@ export const generateSearchSuggestions = async (chapterContent: string) => {
         return ["Jungian archetypes in memoirs", "Transformational growth stories", "Overcoming ego in writing"];
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Based on the following memoir chapter, suggest 3 highly specific search queries to find wisdom videos on YouTube (Jung, Alan Watts, etc.) that would help the author deepen this chapter's themes.
     
@@ -145,7 +145,7 @@ export const analyzeChapterForEnhancement = async (content: string) => {
         };
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Analyze the following memoir chapter. Identify 3 core themes/emotions, summarize the current life lesson, and suggest 3 specific opportunities for integrating philosophical wisdom (Jung, Singer, Watts, etc.).
     
@@ -183,7 +183,7 @@ export const generateIntegrationPreviews = async (chapterContent: string, wisdom
         ];
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Create 3 brief preview snippets (50 words each) showing how wisdom from "${wisdomSource.author}" (specifically his teachings in "${wisdomSource.title}") could be woven into this chapter. 
     Focus on reflection, not lecture. 
@@ -211,7 +211,7 @@ export const enhanceChapterFull = async (chapterContent: string, wisdomSource: a
         return chapterContent + "\n\n[MOCK ENHANCEMENT]: This version includes integrated wisdom from " + wisdomSource.author + " regarding " + wisdomSource.title + ".";
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     REWRITE the following memoir chapter by weaving in philosophical wisdom from ${wisdomSource.author} based on their teachings in "${wisdomSource.title}".
     
@@ -255,7 +255,7 @@ export const scanForButterflies = async (content: string) => {
         };
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Scan the following memoir chapter for butterfly, caterpillar, chrysalis, or transformation metaphors.
     Identify any existing references, determine the metaphor strength (subtle, moderate, prominent), and suggest 3 natural insertion points with previews if the metaphor can be deepened.
@@ -299,7 +299,7 @@ export const generateButterflySuggestions = async (chapterContent: string, butte
         ];
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Based on the memoir chapter below and the set of butterfly/transformation quotes from a wisdom library, suggest 3 specific butterfly analogies that could be integrated.
     Match the best quote to the chapter's themes.
@@ -345,7 +345,7 @@ export const generateChapterTitles = async (content: string) => {
         return ["The First Flutter", "Liquid Identity", "Into the Chrysalis", "Weight of Wings", "Unfolding Fate"];
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Analyze this memoir chapter and suggest 5 evocative, poetic, and meaningful titles.
     CHAPTER: ${content.substring(0, 3000)}
@@ -372,7 +372,7 @@ export const generateVisualPrompts = async (chapterTitle: string, chapterContent
         };
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Based on the chapter titled "${chapterTitle}" and the content below, create highly detailed, artistic prompts for an AI image/video generator.
     The aesthetic should be "Ethereal, Dreamy, Transformative" with butterfly motifs.
@@ -412,7 +412,7 @@ export const generateTikTokScript = async (chapterTitle: string, content: string
         };
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
     Create a TikTok script based on this memoir chapter: "${chapterTitle}".
     Duration: ${duration}

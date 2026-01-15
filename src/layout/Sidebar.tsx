@@ -31,7 +31,7 @@ const Sidebar = () => {
             top: 0
         }}>
             <div style={{ marginBottom: '3rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <img src="/src/assets/images/butterfly_line_art.png" alt="Logo" style={{ width: '32px', height: 'auto' }} />
+                <img src="/images/butterfly_line_art.png" alt="Logo" style={{ width: '32px', height: 'auto' }} />
                 <span style={{
                     fontFamily: 'var(--font-headline)',
                     fontSize: '1.5rem',

@@ -49,7 +49,7 @@ const WelcomeWizard = ({ initialDisplayName, onComplete }: WelcomeWizardProps) =
                         animation: 'float 4s ease-in-out infinite'
                     }}>
                         <img
-                            src="/src/assets/images/butterfly_line_art.png"
+                            src="/images/butterfly_line_art.png"
                             alt="Butterfly"
                             style={{ width: '80px', opacity: 0.6 }}
                         />

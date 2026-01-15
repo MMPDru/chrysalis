@@ -77,7 +77,7 @@ const LoginPage = () => {
             <div style={{
                 position: 'absolute',
                 inset: 0,
-                backgroundImage: 'url(/src/assets/images/butterfly_wing_texture.png)',
+                backgroundImage: 'url(/images/butterfly_wing_texture.png)',
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 opacity: 0.3,
@@ -86,7 +86,7 @@ const LoginPage = () => {
 
             {/* Floating butterflies */}
             <img
-                src="/src/assets/images/butterfly_line_art.png"
+                src="/images/butterfly_line_art.png"
                 alt=""
                 style={{
                     position: 'absolute',
@@ -98,7 +98,7 @@ const LoginPage = () => {
                 }}
             />
             <img
-                src="/src/assets/images/butterfly_line_art.png"
+                src="/images/butterfly_line_art.png"
                 alt=""
                 style={{
                     position: 'absolute',
@@ -127,7 +127,7 @@ const LoginPage = () => {
                 {/* Header */}
                 <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
                     <img
-                        src="/src/assets/images/butterfly_line_art.png"
+                        src="/images/butterfly_line_art.png"
                         alt="Chrysalis"
                         style={{ width: '60px', margin: '0 auto 1rem', opacity: 0.7 }}
                     />
