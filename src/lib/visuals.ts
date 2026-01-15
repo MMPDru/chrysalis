@@ -11,8 +11,7 @@ import {
     onSnapshot,
     Timestamp
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from './firebase';
+import { db } from './firebase';
 
 // Types
 export interface VisualAsset {
@@ -31,19 +30,19 @@ export interface VisualAsset {
 }
 
 /**
- * Save a generated video from Social Media Hub to Firebase Storage and Firestore
+ * Save a generated video from Social Media Hub to Firestore
  * 
  * @param userId - The current user's ID
  * @param chapterId - Optional chapter ID to associate with
- * @param videoData - Either a Blob, base64 data URL, or external URL
+ * @param videoUrl - The video URL returned from n8n (can be external URL or base64 data URL)
  * @param source - Where the video was generated ('social-media' or 'visual-studio')
  * @param metadata - Optional metadata including prompt and platform posts
- * @returns Object with the asset ID and permanent download URL
+ * @returns Object with the asset ID and the video URL
  */
 export const saveGeneratedVideo = async (
     userId: string,
     chapterId: string | null,
-    videoData: Blob | string,
+    videoUrl: string,
     source: 'social-media' | 'visual-studio' = 'social-media',
     metadata?: {
         title?: string;
@@ -51,80 +50,23 @@ export const saveGeneratedVideo = async (
         platforms?: Record<string, string>;
     }
 ): Promise<{ id: string; url: string }> => {
-    let blob: Blob;
-
-    // Convert various input types to Blob
-    if (videoData instanceof Blob) {
-        blob = videoData;
-    } else if (typeof videoData === 'string') {
-        if (videoData.startsWith('data:')) {
-            // Base64 data URL - convert to Blob
-            const response = await fetch(videoData);
-            blob = await response.blob();
-        } else if (videoData.startsWith('http')) {
-            // External URL - fetch and convert to Blob
-            // Note: This may fail due to CORS if the URL doesn't allow cross-origin requests
-            try {
-                const response = await fetch(videoData);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch video: ${response.status}`);
-                }
-                blob = await response.blob();
-            } catch (error) {
-                console.error('CORS or fetch error for video URL:', error);
-                // Fall back to saving just the URL without uploading to Storage
-                const visualsRef = collection(db, 'visualAssets');
-                const docRef = await addDoc(visualsRef, {
-                    userId,
-                    chapterId,
-                    url: videoData, // Save external URL directly
-                    type: 'video',
-                    source,
-                    title: metadata?.title || 'Generated Video',
-                    prompt: metadata?.prompt || '',
-                    platformPosts: metadata?.platforms || {},
-                    createdAt: Timestamp.now(),
-                    archived: false,
-                    externalUrl: true // Flag to indicate this is an external URL
-                });
-                return { id: docRef.id, url: videoData };
-            }
-        } else {
-            throw new Error('Invalid video data: expected Blob, base64 data URL, or http(s) URL');
-        }
-    } else {
-        throw new Error('Invalid video data type');
-    }
-
-    // Generate unique filename
-    const fileName = `videos/${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.mp4`;
-    const storageRef = ref(storage, fileName);
-
-    // Upload to Firebase Storage
-    await uploadBytes(storageRef, blob, {
-        contentType: 'video/mp4'
-    });
-
-    // Get the permanent download URL
-    const downloadUrl = await getDownloadURL(storageRef);
-
-    // Save metadata to Firestore
+    // Simply save the video URL and metadata to Firestore
+    // The URL can be an external URL from n8n's video generation service
     const visualsRef = collection(db, 'visualAssets');
     const docRef = await addDoc(visualsRef, {
         userId,
         chapterId,
-        url: downloadUrl,
+        url: videoUrl,
         type: 'video',
         source,
         title: metadata?.title || 'Generated Video',
         prompt: metadata?.prompt || '',
         platformPosts: metadata?.platforms || {},
-        storagePath: fileName,
         createdAt: Timestamp.now(),
         archived: false
     });
 
-    return { id: docRef.id, url: downloadUrl };
+    return { id: docRef.id, url: videoUrl };
 };
 
 // Update chapter images (legacy support)

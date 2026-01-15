@@ -655,18 +655,27 @@ const SocialMediaRepurpose = () => {
 
         try {
             const controller = new AbortController();
-            // Videos take much longer to generate - use 5 minute timeout
-            const timeoutMs = type === 'Video' ? 300000 : 120000;
+            // Videos take MUCH longer to generate - use 10 MINUTE timeout
+            // n8n video generation can take 3-8 minutes depending on the AI model
+            const timeoutMs = type === 'Video' ? 600000 : 120000; // 10 mins for video, 2 mins for others
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             console.log(`Sending ${type} request to n8n:`, payload);
+            console.log(`Timeout set to ${timeoutMs / 1000} seconds`);
 
             // Call n8n directly - make sure n8n Respond to Webhook has CORS headers configured
+            // For long-running video requests, n8n must keep the connection open
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    // Some browsers may need these for long requests
+                    'Accept': '*/*'
+                },
                 body: JSON.stringify(payload),
-                signal: controller.signal
+                signal: controller.signal,
+                // Ensure the request is not cached
+                cache: 'no-store'
             });
 
             clearTimeout(timeoutId);
@@ -780,10 +789,18 @@ const SocialMediaRepurpose = () => {
 
             if (error.name === 'AbortError') {
                 if (type === 'Video') {
-                    errorMessage = 'Video generation is taking longer than expected (5+ minutes). Your video may still be processing in n8n. Check back in a few minutes.';
+                    errorMessage = 'Video generation timed out after 10 minutes. Your video may still be processing in n8n. Use the Retry button to check.';
                     historyStatus = 'pending'; // Mark as pending, not error
                 } else {
                     errorMessage = 'Request timed out. The generation may still be processing.';
+                }
+            } else if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+                // Connection was dropped during long request
+                if (type === 'Video') {
+                    errorMessage = 'Connection dropped during video generation. Your video may still be processing. Try the Retry button in a few minutes.';
+                    historyStatus = 'pending';
+                } else {
+                    errorMessage = 'Network error. Please try again.';
                 }
             } else {
                 errorMessage = error.message || 'Unknown error occurred';
