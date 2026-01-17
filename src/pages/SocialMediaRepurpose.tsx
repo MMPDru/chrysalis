@@ -11,6 +11,7 @@ import {
     AlertCircle,
     Clock,
     ChevronUp,
+    ChevronDown,
     Sparkles,
     RefreshCw,
     Twitter,
@@ -874,6 +875,30 @@ const SocialMediaRepurpose = () => {
                         posts: {}
                     });
                     setActiveResultTab('videos');
+
+                    // AUTO-SAVE to library immediately
+                    if (currentUser) {
+                        saveVideoToSocialLibrary(
+                            currentUser.uid,
+                            selectedChapterId || null,
+                            selectedChapter?.title || 'Unknown Chapter',
+                            videoUrl,
+                            generatedVideoScene,
+                            {
+                                summary: `Video for ${selectedChapter?.title || 'chapter'}`,
+                                duration: 8,
+                                aspectRatio: '9:16',
+                                platforms: ['tiktok', 'instagram', 'youtube'],
+                                sourceText: selectedText.substring(0, 500),
+                                generationModel: 'n8n',
+                                source: 'social-media'
+                            }
+                        ).then(() => {
+                            console.log('Video auto-saved to library');
+                        }).catch(err => {
+                            console.error('Failed to auto-save video:', err);
+                        });
+                    }
                 } else {
                     console.error('No video URL in response:', data);
                     throw new Error('No video URL returned from n8n');
@@ -1716,6 +1741,27 @@ const SocialMediaRepurpose = () => {
                             </div>
                         )}
 
+                        {/* Show Results Button - when collapsed */}
+                        {!showResults && (postResults.length > 0 || imageResults || videoResults) && (
+                            <button
+                                onClick={() => setShowResults(true)}
+                                className="btn"
+                                style={{
+                                    width: '100%',
+                                    padding: '0.75rem',
+                                    marginTop: '1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '0.5rem',
+                                    background: 'var(--color-primary)',
+                                    color: 'white'
+                                }}
+                            >
+                                <ChevronDown size={16} /> Show Results
+                            </button>
+                        )}
+
                         {/* Results Tabs */}
                         {showResults && (
                             <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '1.5rem' }}>
@@ -2342,8 +2388,14 @@ const SocialMediaRepurpose = () => {
                                             <div style={{ padding: '1rem' }}>
                                                 <div style={{ fontSize: '0.85rem', color: '#444', marginBottom: '0.5rem' }}>{video.prompt.substring(0, 100)}{video.prompt.length > 100 ? '...' : ''}</div>
                                                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>{video.platforms?.map(p => <span key={p} style={{ background: '#f3f4f6', padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.65rem' }}>{p}</span>)}</div>
-                                                <div style={{ fontSize: '0.7rem', color: '#999' }}>{video.chapterTitle} • {video.createdAt.toDate().toLocaleDateString()}</div>
-                                                <a href={video.videoUrl} download className="btn" style={{ display: 'flex', width: '100%', justifyContent: 'center', marginTop: '0.75rem', padding: '0.4rem', fontSize: '0.75rem', textDecoration: 'none' }}><Download size={12} style={{ marginRight: '0.3rem' }} /> Download</a>
+                                                <div style={{ fontSize: '0.7rem', color: '#999', marginBottom: '0.5rem' }}>{video.chapterTitle} • {video.createdAt.toDate().toLocaleDateString()}</div>
+                                                <a href={video.videoUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.7rem', color: 'var(--color-primary)', wordBreak: 'break-all', display: 'block', marginBottom: '0.5rem' }}>
+                                                    🔗 {video.videoUrl.substring(0, 50)}...
+                                                </a>
+                                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                    <a href={video.videoUrl} target="_blank" rel="noopener noreferrer" className="btn" style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '0.4rem', fontSize: '0.75rem', textDecoration: 'none' }}>Open</a>
+                                                    <a href={video.videoUrl} download className="btn" style={{ flex: 1, display: 'flex', justifyContent: 'center', padding: '0.4rem', fontSize: '0.75rem', textDecoration: 'none' }}><Download size={12} style={{ marginRight: '0.3rem' }} /> Download</a>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
