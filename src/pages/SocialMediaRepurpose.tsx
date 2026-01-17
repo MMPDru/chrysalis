@@ -770,24 +770,18 @@ const SocialMediaRepurpose = () => {
 
         try {
             // All requests go through n8n webhook
-            const controller = new AbortController();
-            const timeoutMs = type === 'Video' ? 600000 : 120000; // 10 mins for video, 2 mins for posts/images
-            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
             console.log(`Sending ${type} request to n8n:`, payload);
-            console.log(`Timeout set to ${timeoutMs / 1000} seconds`);
+            console.log(`Webhook URL: ${N8N_WEBHOOK_URL}`);
 
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
+                mode: 'cors',
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify(payload),
-                signal: controller.signal
+                body: JSON.stringify(payload)
             });
-
-            clearTimeout(timeoutId);
 
             if (!response.ok) {
                 throw new Error(`Webhook error: ${response.status} ${response.statusText}`);
@@ -1151,23 +1145,17 @@ const SocialMediaRepurpose = () => {
 
         try {
             // All retries go through n8n
-            const controller = new AbortController();
-            const timeoutMs = type === 'Video' ? 600000 : 120000; // 10 mins for video, 2 mins for others
-            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
             console.log(`Retrying ${type} request:`, historyItem.payload);
 
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
+                mode: 'cors',
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify(historyItem.payload),
-                signal: controller.signal
+                body: JSON.stringify(historyItem.payload)
             });
-
-            clearTimeout(timeoutId);
 
             if (!response.ok) {
                 throw new Error(`Webhook error: ${response.status}`);
