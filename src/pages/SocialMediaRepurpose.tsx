@@ -840,18 +840,29 @@ const SocialMediaRepurpose = () => {
                 setPostResults(parsed);
                 setActiveResultTab('posts');
             } else if (type === 'Image') {
-                // Handle binary image response
-                const imageData = data as { binaryType?: string; imageUrl?: string; prompt?: string };
-                if (imageData.binaryType === 'image' || imageData.imageUrl) {
-                    setImageResults({
-                        imageUrl: imageData.imageUrl || '',
-                        imagePrompt: imageData.prompt || '',
-                        posts: []
-                    });
-                } else {
-                    const parsed = parseImageResponse(data);
+                // First try to parse as regular JSON with URL
+                const parsed = parseImageResponse(data);
+                console.log('Parsed image result:', parsed);
+
+                // Only use parsed result if it has a valid URL (not empty or base64 stub)
+                if (parsed.imageUrl && parsed.imageUrl.startsWith('http')) {
+                    console.log('Using parsed URL:', parsed.imageUrl);
                     setImageResults(parsed);
                     setPostResults(parsed.posts);
+                } else {
+                    // Fallback to checking if data already has imageUrl (from binary conversion)
+                    const imageData = data as { binaryType?: string; imageUrl?: string; prompt?: string };
+                    if (imageData.imageUrl && imageData.imageUrl.length > 50) {
+                        console.log('Using binary imageUrl');
+                        setImageResults({
+                            imageUrl: imageData.imageUrl,
+                            imagePrompt: imageData.prompt || '',
+                            posts: []
+                        });
+                    } else {
+                        console.error('No valid image URL found in response');
+                        setImageResults(parsed); // Show whatever we have
+                    }
                 }
                 setActiveResultTab('images');
             } else if (type === 'Video') {
