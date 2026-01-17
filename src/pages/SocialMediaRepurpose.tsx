@@ -1954,7 +1954,14 @@ const SocialMediaRepurpose = () => {
                                                         objectFit: 'cover',
                                                         borderRadius: '0.75rem'
                                                     }}
+                                                    onError={(e) => {
+                                                        console.error('Image failed to load:', imageResults.imageUrl);
+                                                        (e.target as HTMLImageElement).alt = 'Failed to load: ' + imageResults.imageUrl;
+                                                    }}
                                                 />
+                                                <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '0.5rem', wordBreak: 'break-all' }}>
+                                                    <strong>URL:</strong> <a href={imageResults.imageUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-primary)' }}>{imageResults.imageUrl}</a>
+                                                </div>
                                                 <div style={{
                                                     display: 'flex',
                                                     gap: '0.5rem',
