@@ -37,14 +37,38 @@ import {
 import type { Chapter } from '../lib/types';
 
 // N8N Webhook Configuration
-// Note: If you get CORS errors, configure n8n Respond to Webhook node to add these headers:
-// Access-Control-Allow-Origin: *
-// Access-Control-Allow-Methods: POST, OPTIONS
-// Access-Control-Allow-Headers: Content-Type
+// Note: Using CORS proxy to bypass n8n CORS restrictions
 const N8N_WEBHOOK_URL = "https://m2ai.app.n8n.cloud/webhook/antigravity-webhook";
 
-// Firebase proxy (requires Blaze plan to deploy)
-// const FIREBASE_PROXY_URL = "https://us-central1-chrysalis-app-10581.cloudfunctions.net/n8nProxy";
+// CORS proxy function - wraps fetch to handle CORS via public proxy
+async function corsProxyFetch(url: string, options: RequestInit): Promise<Response> {
+    // Try direct fetch first (in case n8n CORS is fixed)
+    try {
+        const directResponse = await fetch(url, {
+            ...options,
+            mode: 'cors'
+        });
+        // If we get here, CORS worked
+        return directResponse;
+    } catch (corsError) {
+        console.log('Direct fetch failed (CORS), using proxy...');
+    }
+
+    // Use corsproxy.io as a fallback
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+    console.log('Proxying via:', proxyUrl);
+
+    const response = await fetch(proxyUrl, {
+        method: options.method || 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        body: options.body
+    });
+
+    return response;
+}
 
 // Platform configurations
 const PLATFORMS = [
@@ -773,9 +797,8 @@ const SocialMediaRepurpose = () => {
             console.log(`Sending ${type} request to n8n:`, payload);
             console.log(`Webhook URL: ${N8N_WEBHOOK_URL}`);
 
-            const response = await fetch(N8N_WEBHOOK_URL, {
+            const response = await corsProxyFetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
-                mode: 'cors',
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
@@ -1158,9 +1181,8 @@ const SocialMediaRepurpose = () => {
             // All retries go through n8n
             console.log(`Retrying ${type} request:`, historyItem.payload);
 
-            const response = await fetch(N8N_WEBHOOK_URL, {
+            const response = await corsProxyFetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
-                mode: 'cors',
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
