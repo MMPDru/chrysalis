@@ -267,42 +267,48 @@ function parsePostResponse(response: unknown): PostResult[] {
 }
 
 function parseImageResponse(response: unknown): ImageResult {
-    // Handle string response
-    if (typeof response === 'string') {
-        let imageUrl = '';
-        let imagePrompt = '';
-        const urlMatch = response.match(/!\[.*?\]\((https?:\/\/[^)]+)\)/);
-        const imgMatch = response.match(/image[_\s]?url[:\s]+([^\s\n]+)/i);
-        if (urlMatch) imageUrl = urlMatch[1];
-        else if (imgMatch) imageUrl = imgMatch[1];
-        const promptMatch = response.match(/prompt[:\s]+(.+?)(?:\n|$)/i);
-        if (promptMatch) imagePrompt = promptMatch[1].trim();
-        return { imageUrl, imagePrompt, posts: [] };
-    }
+    console.log('FULL image response:', JSON.stringify(response, null, 2));
 
-    // Handle object response
-    const responseObj = response as Record<string, unknown>;
-    const outputText = responseObj.output || response;
-
-    // Check if it's markdown with an image URL
     let imageUrl = '';
     let imagePrompt = '';
 
-    if (typeof outputText === 'string') {
-        // Try to find image URL in markdown
-        const urlMatch = outputText.match(/!\[.*?\]\((https?:\/\/[^)]+)\)/);
-        const imgMatch = outputText.match(/image[_\s]?url[:\s]+([^\s\n]+)/i);
-        if (urlMatch) imageUrl = urlMatch[1];
-        else if (imgMatch) imageUrl = imgMatch[1];
+    // Try direct object paths first
+    if (typeof response === 'object' && response !== null) {
+        const d = response as Record<string, unknown>;
 
-        // Extract prompt if present
-        const promptMatch = outputText.match(/prompt[:\s]+(.+?)(?:\n|$)/i);
-        if (promptMatch) imagePrompt = promptMatch[1].trim();
-    } else {
-        const outputObj = outputText as Record<string, string> | null;
-        imageUrl = outputObj?.image_url || outputObj?.url || '';
-        imagePrompt = outputObj?.unified_image_prompt || outputObj?.prompt || '';
+        // Check common paths: image.url, imageUrl, image_url, url, data.url, images[0].url
+        if (typeof d.image === 'object' && d.image && 'url' in (d.image as object)) {
+            imageUrl = ((d.image as Record<string, string>).url);
+        } else if (typeof d.imageUrl === 'string') {
+            imageUrl = d.imageUrl;
+        } else if (typeof d.image_url === 'string') {
+            imageUrl = d.image_url;
+        } else if (typeof d.url === 'string') {
+            imageUrl = d.url;
+        } else if (typeof d.data === 'object' && d.data && 'url' in (d.data as object)) {
+            imageUrl = ((d.data as Record<string, string>).url);
+        } else if (Array.isArray(d.images) && d.images.length > 0) {
+            const firstImage = d.images[0] as Record<string, string>;
+            imageUrl = firstImage.url || firstImage.image_url || '';
+        }
+
+        // Get prompt
+        if (typeof d.prompt === 'string') imagePrompt = d.prompt;
+        else if (typeof d.unified_image_prompt === 'string') imagePrompt = d.unified_image_prompt;
     }
+
+    // If still not found, use regex to find any image URL
+    if (!imageUrl) {
+        const jsonStr = JSON.stringify(response);
+        // Look for common image URLs
+        const urlMatch = jsonStr.match(/https?:\/\/[^"]+\.(png|jpg|jpeg|webp|gif)/i);
+        if (urlMatch) {
+            imageUrl = urlMatch[0];
+            console.log('Found image URL via regex:', imageUrl);
+        }
+    }
+
+    console.log('Extracted image URL:', imageUrl);
 
     return {
         imageUrl,
