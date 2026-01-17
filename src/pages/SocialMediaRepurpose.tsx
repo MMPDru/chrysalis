@@ -856,16 +856,33 @@ const SocialMediaRepurpose = () => {
                 setActiveResultTab('images');
             } else if (type === 'Video') {
                 // Handle video response from n8n
-                // n8n returns: { video: { url: "..." } } or { videoUrl: "..." } or { url: "..." }
-                const videoData = data as {
-                    video?: { url?: string };
-                    videoUrl?: string;
-                    video_url?: string;
-                    url?: string
-                };
-                const videoUrl = videoData.video?.url || videoData.videoUrl || videoData.video_url || videoData.url;
+                console.log('FULL n8n response:', JSON.stringify(data, null, 2));
 
-                console.log('n8n response data:', data);
+                // Try every possible path to find the video URL
+                const d = data as Record<string, unknown>;
+                let videoUrl: string | undefined;
+
+                // Direct paths
+                if (typeof d.video === 'object' && d.video && 'url' in d.video) {
+                    videoUrl = (d.video as { url: string }).url;
+                } else if (typeof d.videoUrl === 'string') {
+                    videoUrl = d.videoUrl;
+                } else if (typeof d.video_url === 'string') {
+                    videoUrl = d.video_url;
+                } else if (typeof d.url === 'string') {
+                    videoUrl = d.url;
+                }
+
+                // If still not found, search for any URL that looks like a video
+                if (!videoUrl) {
+                    const jsonStr = JSON.stringify(data);
+                    const urlMatch = jsonStr.match(/https?:\/\/[^"]+\.mp4/);
+                    if (urlMatch) {
+                        videoUrl = urlMatch[0];
+                        console.log('Found video URL via regex:', videoUrl);
+                    }
+                }
+
                 console.log('Extracted video URL:', videoUrl);
 
                 if (videoUrl) {
@@ -900,7 +917,7 @@ const SocialMediaRepurpose = () => {
                         });
                     }
                 } else {
-                    console.error('No video URL in response:', data);
+                    console.error('No video URL found in response:', JSON.stringify(data));
                     throw new Error('No video URL returned from n8n');
                 }
             }
