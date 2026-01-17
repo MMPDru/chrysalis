@@ -22,7 +22,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { subscribeToChapters, fetchLatestVersion } from '../lib/chapters';
-import { saveGeneratedVideo } from '../lib/visuals';
 import { generateVideoWithFal } from '../lib/fal';
 import {
     savePostToLibrary,
@@ -1039,7 +1038,7 @@ const SocialMediaRepurpose = () => {
         }
     };
 
-    // Save video to Firebase library (both visuals and social media library)
+    // Save video to library - just save the URL directly, no re-uploading
     const handleSaveVideoToLibrary = async () => {
         if (!videoResults?.videoUrl || !currentUser) {
             console.error('No video URL or user to save');
@@ -1049,26 +1048,12 @@ const SocialMediaRepurpose = () => {
         setIsSavingVideo(true);
 
         try {
-            // Save to visuals library (for storage upload)
-            const { id, url } = await saveGeneratedVideo(
-                currentUser.uid,
-                selectedChapterId || null,
-                videoResults.videoUrl,
-                videoResults.videoPrompt || 'Social media video',
-                selectedChapter?.title
-                    ? `${selectedChapter.title} - Social Media Video`
-                    : 'Generated Video',
-                'social-media'
-            );
-
-            console.log('Video saved to visuals library:', id, url);
-
-            // Also save to social media library with full metadata
-            await saveVideoToSocialLibrary(
+            // Simply save the video URL to Firestore - no re-uploading needed
+            const docRef = await saveVideoToSocialLibrary(
                 currentUser.uid,
                 selectedChapterId || null,
                 selectedChapter?.title || 'Unknown Chapter',
-                url, // Use the permanent Firebase URL
+                videoResults.videoUrl, // Use the URL directly from n8n/Fal.ai
                 videoResults.videoPrompt || generatedVideoScene,
                 {
                     summary: `Social media video for ${selectedChapter?.title || 'chapter'}`,
@@ -1081,15 +1066,8 @@ const SocialMediaRepurpose = () => {
                 }
             );
 
-            console.log('Video also saved to social media library');
-
-            // Update the video URL to the permanent Firebase URL if it changed
-            if (url !== videoResults.videoUrl) {
-                setVideoResults(prev => prev ? { ...prev, videoUrl: url } : null);
-            }
-
-            // Show success state
-            setVideoSavedId(id);
+            console.log('Video saved to library:', docRef.id);
+            setVideoSavedId(docRef.id);
             setTimeout(() => setVideoSavedId(null), 3000);
 
         } catch (error) {
