@@ -24,7 +24,17 @@ import { useAuth } from '../contexts/AuthContext';
 import { subscribeToChapters, fetchLatestVersion } from '../lib/chapters';
 import { saveGeneratedVideo } from '../lib/visuals';
 import { generateVideoWithFal } from '../lib/fal';
-import { savePostToLibrary, saveImageToSocialLibrary, saveVideoToSocialLibrary } from '../lib/social';
+import {
+    savePostToLibrary,
+    saveImageToSocialLibrary,
+    saveVideoToSocialLibrary,
+    subscribeToSavedPosts,
+    subscribeToSavedImages,
+    subscribeToSavedVideos,
+    type SavedPost,
+    type SavedImage,
+    type SavedVideo
+} from '../lib/social';
 import type { Chapter } from '../lib/types';
 
 // N8N Webhook Configuration
@@ -560,6 +570,26 @@ const SocialMediaRepurpose = () => {
     const [isSavingImage, setIsSavingImage] = useState(false);
     const [imageSavedId, setImageSavedId] = useState<string | null>(null);
 
+    // Library state
+    const [savedPosts, setSavedPosts] = useState<SavedPost[]>([]);
+    const [savedImages, setSavedImages] = useState<SavedImage[]>([]);
+    const [savedVideos, setSavedVideos] = useState<SavedVideo[]>([]);
+    const [libraryLoading, setLibraryLoading] = useState(true);
+    const [viewMode, setViewMode] = useState<'generate' | 'library'>('generate');
+    const [libraryTab, setLibraryTab] = useState<'posts' | 'images' | 'videos'>('posts');
+    const [showArchivedLibrary, setShowArchivedLibrary] = useState(false);
+
+    // Filter library items by selected chapter
+    const filteredPosts = selectedChapterId
+        ? savedPosts.filter(p => p.chapterId === selectedChapterId && (showArchivedLibrary || !p.archived))
+        : savedPosts.filter(p => showArchivedLibrary || !p.archived);
+    const filteredImages = selectedChapterId
+        ? savedImages.filter(i => i.chapterId === selectedChapterId && (showArchivedLibrary || !i.archived))
+        : savedImages.filter(i => showArchivedLibrary || !i.archived);
+    const filteredVideos = selectedChapterId
+        ? savedVideos.filter(v => v.chapterId === selectedChapterId && (showArchivedLibrary || !v.archived))
+        : savedVideos.filter(v => showArchivedLibrary || !v.archived);
+
     // Persist results to localStorage when they change
     useEffect(() => {
         try {
@@ -633,6 +663,19 @@ const SocialMediaRepurpose = () => {
     useEffect(() => {
         if (!currentUser) return;
         return subscribeToChapters(currentUser.uid, setChapters);
+    }, [currentUser]);
+
+    // Load saved library items from Firebase
+    useEffect(() => {
+        if (!currentUser) { setLibraryLoading(false); return; }
+        setLibraryLoading(true);
+        const unsubPosts = subscribeToSavedPosts(currentUser.uid, (posts) => {
+            setSavedPosts(posts);
+            setLibraryLoading(false);
+        });
+        const unsubImages = subscribeToSavedImages(currentUser.uid, (images) => setSavedImages(images));
+        const unsubVideos = subscribeToSavedVideos(currentUser.uid, (videos) => setSavedVideos(videos));
+        return () => { unsubPosts(); unsubImages(); unsubVideos(); };
     }, [currentUser]);
 
     // Load chapter content when selected
@@ -1267,215 +1310,309 @@ const SocialMediaRepurpose = () => {
                     </span>
                 </div>
                 <h1 className="text-serif" style={{ fontSize: '2.5rem', margin: '0 0 0.75rem 0' }}>
-                    Transform Your Story
+                    {viewMode === 'generate' ? 'Transform Your Story' : 'Your Content Library'}
                 </h1>
-                <p style={{ color: '#666', fontSize: '1rem', maxWidth: '600px', margin: '0 auto' }}>
-                    Turn your memoir passages into scroll-stopping social content
+                <p style={{ color: '#666', fontSize: '1rem', maxWidth: '600px', margin: '0 auto 1.5rem auto' }}>
+                    {viewMode === 'generate' ? 'Turn your memoir passages into scroll-stopping social content' : 'Browse and manage your saved posts, images, and videos'}
                 </p>
+                <div style={{ display: 'inline-flex', gap: '0.5rem', padding: '0.25rem', background: '#f3f4f6', borderRadius: '0.75rem' }}>
+                    <button onClick={() => setViewMode('generate')} className="btn" style={{ padding: '0.6rem 1.5rem', fontSize: '0.85rem', fontWeight: 600, background: viewMode === 'generate' ? 'white' : 'transparent', color: viewMode === 'generate' ? 'var(--color-primary)' : '#666', border: 'none', borderRadius: '0.5rem', boxShadow: viewMode === 'generate' ? '0 2px 4px rgba(0,0,0,0.1)' : 'none' }}>
+                        <Sparkles size={16} style={{ marginRight: '0.4rem' }} /> Generate
+                    </button>
+                    <button onClick={() => setViewMode('library')} className="btn" style={{ padding: '0.6rem 1.5rem', fontSize: '0.85rem', fontWeight: 600, background: viewMode === 'library' ? 'white' : 'transparent', color: viewMode === 'library' ? 'var(--color-primary)' : '#666', border: 'none', borderRadius: '0.5rem', boxShadow: viewMode === 'library' ? '0 2px 4px rgba(0,0,0,0.1)' : 'none' }}>
+                        <Save size={16} style={{ marginRight: '0.4rem' }} /> Library ({savedPosts.length + savedImages.length + savedVideos.length})
+                    </button>
+                </div>
             </header>
 
-            {/* Main 3-Panel Layout */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: '300px 1fr 320px',
-                gap: '1.5rem',
-                alignItems: 'start'
-            }}>
-                {/* LEFT PANEL - Content Source */}
-                <div className="card" style={{ padding: '1.5rem' }}>
-                    <h3 style={{
-                        fontSize: '0.75rem',
-                        fontWeight: 700,
-                        color: '#999',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.1em',
-                        marginBottom: '1rem'
-                    }}>
-                        Content Source
-                    </h3>
+            {/* Main 3-Panel Layout - Generate Mode */}
+            {viewMode === 'generate' && (
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '300px 1fr 320px',
+                    gap: '1.5rem',
+                    alignItems: 'start'
+                }}>
+                    {/* LEFT PANEL - Content Source */}
+                    <div className="card" style={{ padding: '1.5rem' }}>
+                        <h3 style={{
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            color: '#999',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.1em',
+                            marginBottom: '1rem'
+                        }}>
+                            Content Source
+                        </h3>
 
-                    {/* Chapter Selector */}
-                    <div style={{ marginBottom: '1.5rem' }}>
-                        <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem' }}>
-                            Select Chapter
-                        </label>
-                        <select
-                            value={selectedChapterId}
-                            onChange={(e) => setSelectedChapterId(e.target.value)}
-                            className="status-select"
-                            style={{ width: '100%' }}
-                        >
-                            <option value="">Choose a chapter...</option>
-                            {chapters.map(c => (
-                                <option key={c.id} value={c.id}>
-                                    Ch. {c.chapterNumber}: {c.title}
-                                </option>
-                            ))}
-                        </select>
+                        {/* Chapter Selector */}
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.5rem' }}>
+                                Select Chapter
+                            </label>
+                            <select
+                                value={selectedChapterId}
+                                onChange={(e) => setSelectedChapterId(e.target.value)}
+                                className="status-select"
+                                style={{ width: '100%' }}
+                            >
+                                <option value="">Choose a chapter...</option>
+                                {chapters.map(c => (
+                                    <option key={c.id} value={c.id}>
+                                        Ch. {c.chapterNumber}: {c.title}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Content Preview */}
+                        {selectedChapterId ? (
+                            <div>
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    marginBottom: '0.75rem'
+                                }}>
+                                    <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                        Content
+                                    </label>
+                                    <label style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        fontSize: '0.8rem',
+                                        color: '#666',
+                                        cursor: 'pointer'
+                                    }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelectAll}
+                                            onChange={(e) => {
+                                                setIsSelectAll(e.target.checked);
+                                                if (e.target.checked) {
+                                                    setSelectedText(stripHtml(chapterContent));
+                                                }
+                                            }}
+                                        />
+                                        All
+                                    </label>
+                                </div>
+
+                                <div style={{
+                                    height: '220px',
+                                    overflowY: 'auto',
+                                    padding: '1rem',
+                                    background: '#f9f9f9',
+                                    borderRadius: '0.5rem',
+                                    border: '1px solid #e5e7eb',
+                                    fontSize: '0.85rem',
+                                    lineHeight: 1.6,
+                                    color: '#444'
+                                }}>
+                                    {isSelectAll ? (
+                                        <div style={{ whiteSpace: 'pre-wrap' }}>
+                                            {selectedText || 'No content in this chapter yet.'}
+                                        </div>
+                                    ) : (
+                                        <textarea
+                                            value={selectedText}
+                                            onChange={(e) => setSelectedText(e.target.value)}
+                                            placeholder="Paste or type the specific passage..."
+                                            style={{
+                                                width: '100%',
+                                                height: '100%',
+                                                border: 'none',
+                                                background: 'transparent',
+                                                resize: 'none',
+                                                outline: 'none',
+                                                fontFamily: 'inherit',
+                                                fontSize: 'inherit',
+                                                lineHeight: 'inherit'
+                                            }}
+                                        />
+                                    )}
+                                </div>
+
+                                {/* Word count & tags */}
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    marginTop: '0.75rem',
+                                    fontSize: '0.75rem',
+                                    color: '#999'
+                                }}>
+                                    <span>{wordCount} words</span>
+                                    {selectedChapter?.butterflyStage && (
+                                        <span style={{
+                                            background: 'var(--color-hover)',
+                                            padding: '0.2rem 0.5rem',
+                                            borderRadius: '999px',
+                                            color: 'var(--color-primary)'
+                                        }}>
+                                            🦋 {selectedChapter.butterflyStage}
+                                        </span>
+                                    )}
+                                </div>
+
+                                {/* Tone Selection */}
+                                <div style={{ marginTop: '1.5rem' }}>
+                                    <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.75rem' }}>
+                                        Tone
+                                    </label>
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(2, 1fr)',
+                                        gap: '0.4rem'
+                                    }}>
+                                        {TONES.map(tone => (
+                                            <button
+                                                key={tone.id}
+                                                onClick={() => setSelectedTone(tone.id)}
+                                                className="btn"
+                                                style={{
+                                                    padding: '0.4rem 0.5rem',
+                                                    fontSize: '0.7rem',
+                                                    gap: '0.3rem',
+                                                    background: selectedTone === tone.id
+                                                        ? 'var(--color-primary)'
+                                                        : '#f3f4f6',
+                                                    color: selectedTone === tone.id
+                                                        ? 'white'
+                                                        : '#666',
+                                                    border: 'none',
+                                                    justifyContent: 'flex-start'
+                                                }}
+                                            >
+                                                {tone.emoji} {tone.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div style={{
+                                height: '300px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'linear-gradient(135deg, rgba(107, 73, 132, 0.05), rgba(212, 175, 55, 0.05))',
+                                borderRadius: '1rem',
+                                textAlign: 'center',
+                                padding: '2rem'
+                            }}>
+                                <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.3 }}>🦋</div>
+                                <p style={{ color: '#999', fontSize: '0.9rem' }}>
+                                    Select a chapter to begin
+                                </p>
+                            </div>
+                        )}
                     </div>
 
-                    {/* Content Preview */}
-                    {selectedChapterId ? (
-                        <div>
-                            <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                marginBottom: '0.75rem'
-                            }}>
-                                <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
-                                    Content
-                                </label>
-                                <label style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    fontSize: '0.8rem',
-                                    color: '#666',
-                                    cursor: 'pointer'
-                                }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={isSelectAll}
-                                        onChange={(e) => {
-                                            setIsSelectAll(e.target.checked);
-                                            if (e.target.checked) {
-                                                setSelectedText(stripHtml(chapterContent));
-                                            }
-                                        }}
-                                    />
-                                    All
-                                </label>
-                            </div>
+                    {/* CENTER PANEL - Generation Hub */}
+                    <div className="card" style={{ padding: '1.5rem' }}>
+                        <h3 style={{
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            color: '#999',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.1em',
+                            marginBottom: '1rem'
+                        }}>
+                            Generation Hub
+                        </h3>
 
-                            <div style={{
-                                height: '220px',
-                                overflowY: 'auto',
-                                padding: '1rem',
-                                background: '#f9f9f9',
-                                borderRadius: '0.5rem',
-                                border: '1px solid #e5e7eb',
-                                fontSize: '0.85rem',
-                                lineHeight: 1.6,
-                                color: '#444'
-                            }}>
-                                {isSelectAll ? (
-                                    <div style={{ whiteSpace: 'pre-wrap' }}>
-                                        {selectedText || 'No content in this chapter yet.'}
-                                    </div>
-                                ) : (
-                                    <textarea
-                                        value={selectedText}
-                                        onChange={(e) => setSelectedText(e.target.value)}
-                                        placeholder="Paste or type the specific passage..."
-                                        style={{
-                                            width: '100%',
-                                            height: '100%',
-                                            border: 'none',
-                                            background: 'transparent',
-                                            resize: 'none',
-                                            outline: 'none',
-                                            fontFamily: 'inherit',
-                                            fontSize: 'inherit',
-                                            lineHeight: 'inherit'
-                                        }}
-                                    />
-                                )}
-                            </div>
-
-                            {/* Word count & tags */}
-                            <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                marginTop: '0.75rem',
-                                fontSize: '0.75rem',
-                                color: '#999'
-                            }}>
-                                <span>{wordCount} words</span>
-                                {selectedChapter?.butterflyStage && (
-                                    <span style={{
-                                        background: 'var(--color-hover)',
-                                        padding: '0.2rem 0.5rem',
-                                        borderRadius: '999px',
-                                        color: 'var(--color-primary)'
-                                    }}>
-                                        🦋 {selectedChapter.butterflyStage}
-                                    </span>
-                                )}
-                            </div>
-
-                            {/* Tone Selection */}
-                            <div style={{ marginTop: '1.5rem' }}>
-                                <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.75rem' }}>
-                                    Tone
-                                </label>
+                        {/* Prompt Preview */}
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            {/* Prompt Context Manager */}
+                            <div style={{ marginBottom: '1.5rem' }}>
                                 <div style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: 'repeat(2, 1fr)',
-                                    gap: '0.4rem'
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    marginBottom: '0.5rem'
                                 }}>
-                                    {TONES.map(tone => (
+                                    <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                        Context & Strategy
+                                    </label>
+                                    <button
+                                        onClick={() => setIsEditingContext(!isEditingContext)}
+                                        className="btn"
+                                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                                    >
+                                        {isEditingContext ? 'Done' : 'Edit'}
+                                    </button>
+                                </div>
+
+                                {/* Tabs */}
+                                <div style={{ display: 'flex', gap: '2px', marginBottom: '0.5rem' }}>
+                                    {[
+                                        { id: 'chapter', label: 'Chapter' },
+                                        { id: 'theme', label: 'Theme' },
+                                        { id: 'wisdom', label: 'Wisdom' },
+                                        { id: 'voice', label: 'Voice' }
+                                    ].map(tab => (
                                         <button
-                                            key={tone.id}
-                                            onClick={() => setSelectedTone(tone.id)}
-                                            className="btn"
+                                            key={tab.id}
+                                            onClick={() => setContextTab(tab.id as 'chapter' | 'theme' | 'wisdom' | 'voice')}
                                             style={{
-                                                padding: '0.4rem 0.5rem',
-                                                fontSize: '0.7rem',
-                                                gap: '0.3rem',
-                                                background: selectedTone === tone.id
-                                                    ? 'var(--color-primary)'
-                                                    : '#f3f4f6',
-                                                color: selectedTone === tone.id
-                                                    ? 'white'
-                                                    : '#666',
-                                                border: 'none',
-                                                justifyContent: 'flex-start'
+                                                flex: 1,
+                                                padding: '0.5rem',
+                                                fontSize: '0.75rem',
+                                                fontWeight: 600,
+                                                background: contextTab === tab.id ? 'white' : '#f3f4f6',
+                                                color: contextTab === tab.id ? 'var(--color-primary)' : '#666',
+                                                border: '1px solid #e5e7eb',
+                                                borderBottom: contextTab === tab.id ? 'none' : '1px solid #e5e7eb',
+                                                borderRadius: '0.5rem 0.5rem 0 0',
+                                                cursor: 'pointer'
                                             }}
                                         >
-                                            {tone.emoji} {tone.label}
+                                            {tab.label}
                                         </button>
                                     ))}
                                 </div>
+
+                                {/* Active Tab Content */}
+                                <textarea
+                                    value={
+                                        contextTab === 'chapter' ? contextFields.chapter_context :
+                                            contextTab === 'theme' ? contextFields.butterfly_theme :
+                                                contextTab === 'wisdom' ? contextFields.wisdom_lessons :
+                                                    contextFields.author_voice
+                                    }
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setContextFields((prev: typeof contextFields) => ({
+                                            ...prev,
+                                            [contextTab === 'chapter' ? 'chapter_context' :
+                                                contextTab === 'theme' ? 'butterfly_theme' :
+                                                    contextTab === 'wisdom' ? 'wisdom_lessons' :
+                                                        'author_voice']: val
+                                        }));
+                                    }}
+                                    readOnly={!isEditingContext}
+                                    style={{
+                                        width: '100%',
+                                        height: '200px',
+                                        padding: '0.75rem',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '0 0 0.5rem 0.5rem',
+                                        fontSize: '0.8rem',
+                                        resize: 'none',
+                                        fontFamily: 'inherit',
+                                        lineHeight: 1.5,
+                                        background: isEditingContext ? 'white' : '#f9f9f9',
+                                        color: '#444'
+                                    }}
+                                />
                             </div>
                         </div>
-                    ) : (
-                        <div style={{
-                            height: '300px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            background: 'linear-gradient(135deg, rgba(107, 73, 132, 0.05), rgba(212, 175, 55, 0.05))',
-                            borderRadius: '1rem',
-                            textAlign: 'center',
-                            padding: '2rem'
-                        }}>
-                            <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.3 }}>🦋</div>
-                            <p style={{ color: '#999', fontSize: '0.9rem' }}>
-                                Select a chapter to begin
-                            </p>
-                        </div>
-                    )}
-                </div>
 
-                {/* CENTER PANEL - Generation Hub */}
-                <div className="card" style={{ padding: '1.5rem' }}>
-                    <h3 style={{
-                        fontSize: '0.75rem',
-                        fontWeight: 700,
-                        color: '#999',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.1em',
-                        marginBottom: '1rem'
-                    }}>
-                        Generation Hub
-                    </h3>
-
-                    {/* Prompt Preview */}
-                    <div style={{ marginBottom: '1.5rem' }}>
-                        {/* Prompt Context Manager */}
+                        {/* Generated Topic/Scene Preview */}
                         <div style={{ marginBottom: '1.5rem' }}>
                             <div style={{
                                 display: 'flex',
@@ -1484,788 +1621,789 @@ const SocialMediaRepurpose = () => {
                                 marginBottom: '0.5rem'
                             }}>
                                 <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
-                                    Context & Strategy
+                                    Generated Topic/Scene
                                 </label>
                                 <button
-                                    onClick={() => setIsEditingContext(!isEditingContext)}
+                                    onClick={() => setIsEditingPrompt(!isEditingPrompt)}
                                     className="btn"
                                     style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
                                 >
-                                    {isEditingContext ? 'Done' : 'Edit'}
+                                    {isEditingPrompt ? 'Done' : 'Edit'}
                                 </button>
                             </div>
-
-                            {/* Tabs */}
-                            <div style={{ display: 'flex', gap: '2px', marginBottom: '0.5rem' }}>
-                                {[
-                                    { id: 'chapter', label: 'Chapter' },
-                                    { id: 'theme', label: 'Theme' },
-                                    { id: 'wisdom', label: 'Wisdom' },
-                                    { id: 'voice', label: 'Voice' }
-                                ].map(tab => (
-                                    <button
-                                        key={tab.id}
-                                        onClick={() => setContextTab(tab.id as 'chapter' | 'theme' | 'wisdom' | 'voice')}
-                                        style={{
-                                            flex: 1,
-                                            padding: '0.5rem',
-                                            fontSize: '0.75rem',
-                                            fontWeight: 600,
-                                            background: contextTab === tab.id ? 'white' : '#f3f4f6',
-                                            color: contextTab === tab.id ? 'var(--color-primary)' : '#666',
-                                            border: '1px solid #e5e7eb',
-                                            borderBottom: contextTab === tab.id ? 'none' : '1px solid #e5e7eb',
-                                            borderRadius: '0.5rem 0.5rem 0 0',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        {tab.label}
-                                    </button>
-                                ))}
-                            </div>
-
-                            {/* Active Tab Content */}
                             <textarea
-                                value={
-                                    contextTab === 'chapter' ? contextFields.chapter_context :
-                                        contextTab === 'theme' ? contextFields.butterfly_theme :
-                                            contextTab === 'wisdom' ? contextFields.wisdom_lessons :
-                                                contextFields.author_voice
-                                }
+                                value={activeResultTab === 'videos' ? generatedVideoScene : generatedTopic}
                                 onChange={(e) => {
-                                    const val = e.target.value;
-                                    setContextFields((prev: typeof contextFields) => ({
-                                        ...prev,
-                                        [contextTab === 'chapter' ? 'chapter_context' :
-                                            contextTab === 'theme' ? 'butterfly_theme' :
-                                                contextTab === 'wisdom' ? 'wisdom_lessons' :
-                                                    'author_voice']: val
-                                    }));
+                                    if (activeResultTab === 'videos') {
+                                        setGeneratedVideoScene(e.target.value);
+                                    } else {
+                                        setGeneratedTopic(e.target.value);
+                                    }
                                 }}
-                                readOnly={!isEditingContext}
+                                readOnly={!isEditingPrompt}
+                                placeholder="Select content to auto-generate a topic..."
                                 style={{
                                     width: '100%',
-                                    height: '200px',
+                                    height: '100px',
                                     padding: '0.75rem',
                                     border: '1px solid #e5e7eb',
-                                    borderRadius: '0 0 0.5rem 0.5rem',
+                                    borderRadius: '0.5rem',
                                     fontSize: '0.8rem',
                                     resize: 'none',
                                     fontFamily: 'inherit',
                                     lineHeight: 1.5,
-                                    background: isEditingContext ? 'white' : '#f9f9f9',
+                                    background: isEditingPrompt ? 'white' : '#f9f9f9',
                                     color: '#444'
                                 }}
                             />
                         </div>
-                    </div>
 
-                    {/* Generated Topic/Scene Preview */}
-                    <div style={{ marginBottom: '1.5rem' }}>
+
+                        {/* Three Main Generation Buttons */}
                         <div style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            marginBottom: '0.5rem'
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(3, 1fr)',
+                            gap: '1rem',
+                            marginBottom: '1.5rem'
                         }}>
-                            <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
-                                Generated Topic/Scene
-                            </label>
+                            {/* Posts Button */}
                             <button
-                                onClick={() => setIsEditingPrompt(!isEditingPrompt)}
+                                onClick={() => sendToN8N('Post')}
+                                disabled={isLoading.posts || !selectedText}
                                 className="btn"
-                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                                style={{
+                                    flexDirection: 'column',
+                                    padding: '1.5rem 1rem',
+                                    gap: '0.75rem',
+                                    background: isLoading.posts
+                                        ? '#e5e7eb'
+                                        : 'linear-gradient(135deg, #6B4984, #8B5CA0)',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '1rem',
+                                    opacity: !selectedText ? 0.5 : 1
+                                }}
                             >
-                                {isEditingPrompt ? 'Done' : 'Edit'}
+                                {isLoading.posts ? (
+                                    <Loader2 size={28} className="animate-spin" />
+                                ) : (
+                                    <FileText size={28} />
+                                )}
+                                <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>POSTS</span>
+                                <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>Text content</span>
+                            </button>
+
+                            {/* Images Button */}
+                            <button
+                                onClick={() => sendToN8N('Image')}
+                                disabled={isLoading.images || !selectedText}
+                                className="btn"
+                                style={{
+                                    flexDirection: 'column',
+                                    padding: '1.5rem 1rem',
+                                    gap: '0.75rem',
+                                    background: isLoading.images
+                                        ? '#e5e7eb'
+                                        : 'linear-gradient(135deg, #D4AF37, #C5A028)',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '1rem',
+                                    opacity: !selectedText ? 0.5 : 1
+                                }}
+                            >
+                                {isLoading.images ? (
+                                    <Loader2 size={28} className="animate-spin" />
+                                ) : (
+                                    <ImageIcon size={28} />
+                                )}
+                                <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>IMAGES</span>
+                                <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>Visual content</span>
+                            </button>
+
+                            {/* Videos Button */}
+                            <button
+                                onClick={() => sendToN8N('Video')}
+                                disabled={isLoading.videos || !selectedText}
+                                className="btn"
+                                style={{
+                                    flexDirection: 'column',
+                                    padding: '1.5rem 1rem',
+                                    gap: '0.75rem',
+                                    background: isLoading.videos
+                                        ? '#e5e7eb'
+                                        : 'linear-gradient(135deg, #10b981, #059669)',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '1rem',
+                                    opacity: !selectedText ? 0.5 : 1
+                                }}
+                            >
+                                {isLoading.videos ? (
+                                    <Loader2 size={28} className="animate-spin" />
+                                ) : (
+                                    <Video size={28} />
+                                )}
+                                <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>VIDEOS</span>
+                                <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>Clips & scripts</span>
                             </button>
                         </div>
-                        <textarea
-                            value={activeResultTab === 'videos' ? generatedVideoScene : generatedTopic}
-                            onChange={(e) => {
-                                if (activeResultTab === 'videos') {
-                                    setGeneratedVideoScene(e.target.value);
-                                } else {
-                                    setGeneratedTopic(e.target.value);
-                                }
-                            }}
-                            readOnly={!isEditingPrompt}
-                            placeholder="Select content to auto-generate a topic..."
-                            style={{
-                                width: '100%',
-                                height: '100px',
-                                padding: '0.75rem',
-                                border: '1px solid #e5e7eb',
+
+                        {/* Error Display */}
+                        {(errors.posts || errors.images || errors.videos) && (
+                            <div style={{
+                                background: '#fef2f2',
+                                border: '1px solid #fecaca',
                                 borderRadius: '0.5rem',
-                                fontSize: '0.8rem',
-                                resize: 'none',
-                                fontFamily: 'inherit',
-                                lineHeight: 1.5,
-                                background: isEditingPrompt ? 'white' : '#f9f9f9',
-                                color: '#444'
-                            }}
-                        />
-                    </div>
-
-
-                    {/* Three Main Generation Buttons */}
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(3, 1fr)',
-                        gap: '1rem',
-                        marginBottom: '1.5rem'
-                    }}>
-                        {/* Posts Button */}
-                        <button
-                            onClick={() => sendToN8N('Post')}
-                            disabled={isLoading.posts || !selectedText}
-                            className="btn"
-                            style={{
-                                flexDirection: 'column',
-                                padding: '1.5rem 1rem',
-                                gap: '0.75rem',
-                                background: isLoading.posts
-                                    ? '#e5e7eb'
-                                    : 'linear-gradient(135deg, #6B4984, #8B5CA0)',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '1rem',
-                                opacity: !selectedText ? 0.5 : 1
-                            }}
-                        >
-                            {isLoading.posts ? (
-                                <Loader2 size={28} className="animate-spin" />
-                            ) : (
-                                <FileText size={28} />
-                            )}
-                            <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>POSTS</span>
-                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>Text content</span>
-                        </button>
-
-                        {/* Images Button */}
-                        <button
-                            onClick={() => sendToN8N('Image')}
-                            disabled={isLoading.images || !selectedText}
-                            className="btn"
-                            style={{
-                                flexDirection: 'column',
-                                padding: '1.5rem 1rem',
-                                gap: '0.75rem',
-                                background: isLoading.images
-                                    ? '#e5e7eb'
-                                    : 'linear-gradient(135deg, #D4AF37, #C5A028)',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '1rem',
-                                opacity: !selectedText ? 0.5 : 1
-                            }}
-                        >
-                            {isLoading.images ? (
-                                <Loader2 size={28} className="animate-spin" />
-                            ) : (
-                                <ImageIcon size={28} />
-                            )}
-                            <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>IMAGES</span>
-                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>Visual content</span>
-                        </button>
-
-                        {/* Videos Button */}
-                        <button
-                            onClick={() => sendToN8N('Video')}
-                            disabled={isLoading.videos || !selectedText}
-                            className="btn"
-                            style={{
-                                flexDirection: 'column',
-                                padding: '1.5rem 1rem',
-                                gap: '0.75rem',
-                                background: isLoading.videos
-                                    ? '#e5e7eb'
-                                    : 'linear-gradient(135deg, #10b981, #059669)',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '1rem',
-                                opacity: !selectedText ? 0.5 : 1
-                            }}
-                        >
-                            {isLoading.videos ? (
-                                <Loader2 size={28} className="animate-spin" />
-                            ) : (
-                                <Video size={28} />
-                            )}
-                            <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>VIDEOS</span>
-                            <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>Clips & scripts</span>
-                        </button>
-                    </div>
-
-                    {/* Error Display */}
-                    {(errors.posts || errors.images || errors.videos) && (
-                        <div style={{
-                            background: '#fef2f2',
-                            border: '1px solid #fecaca',
-                            borderRadius: '0.5rem',
-                            padding: '0.75rem 1rem',
-                            marginBottom: '1rem',
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: '0.5rem'
-                        }}>
-                            <AlertCircle size={16} color="#dc2626" style={{ marginTop: '0.1rem' }} />
-                            <div style={{ fontSize: '0.8rem', color: '#dc2626' }}>
-                                {errors.posts || errors.images || errors.videos}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Results Tabs */}
-                    {showResults && (
-                        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '1.5rem' }}>
-                            <div style={{
+                                padding: '0.75rem 1rem',
+                                marginBottom: '1rem',
                                 display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                marginBottom: '1rem'
+                                alignItems: 'flex-start',
+                                gap: '0.5rem'
                             }}>
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    {['posts', 'images', 'videos'].map(tab => (
-                                        <button
-                                            key={tab}
-                                            onClick={() => setActiveResultTab(tab as 'posts' | 'images' | 'videos')}
-                                            className="btn"
-                                            style={{
-                                                padding: '0.4rem 0.75rem',
-                                                fontSize: '0.8rem',
-                                                background: activeResultTab === tab ? 'var(--color-primary)' : '#f3f4f6',
-                                                color: activeResultTab === tab ? 'white' : '#666',
-                                                border: 'none',
-                                                textTransform: 'capitalize'
-                                            }}
-                                        >
-                                            {tab}
-                                        </button>
-                                    ))}
+                                <AlertCircle size={16} color="#dc2626" style={{ marginTop: '0.1rem' }} />
+                                <div style={{ fontSize: '0.8rem', color: '#dc2626' }}>
+                                    {errors.posts || errors.images || errors.videos}
                                 </div>
-                                <button
-                                    onClick={() => setShowResults(false)}
-                                    className="btn"
-                                    style={{ padding: '0.3rem', fontSize: '0.7rem' }}
-                                >
-                                    <ChevronUp size={14} />
-                                </button>
                             </div>
+                        )}
 
-                            {/* Posts Results */}
-                            {activeResultTab === 'posts' && postResults.length > 0 && (
-                                <div>
-                                    <div style={{
-                                        display: 'flex',
-                                        justifyContent: 'flex-end',
-                                        marginBottom: '0.75rem'
-                                    }}>
-                                        <button
-                                            onClick={handleSaveAllPosts}
-                                            className="btn btn-primary"
-                                            style={{
-                                                padding: '0.4rem 0.75rem',
-                                                fontSize: '0.75rem',
-                                                gap: '0.3rem'
-                                            }}
-                                        >
-                                            <Save size={12} />
-                                            Save All Posts to Library
-                                        </button>
-                                    </div>
-                                    <div style={{
-                                        display: 'grid',
-                                        gridTemplateColumns: 'repeat(2, 1fr)',
-                                        gap: '0.75rem',
-                                        maxHeight: '400px',
-                                        overflowY: 'auto'
-                                    }}>
-                                        {postResults.map((post, idx) => {
-                                            const Icon = getPlatformIcon(post.platform);
-                                            const color = getPlatformColor(post.platform);
-                                            const postId = `post-${idx}`;
-
-                                            return (
-                                                <div
-                                                    key={idx}
-                                                    style={{
-                                                        background: 'white',
-                                                        border: '1px solid #e5e7eb',
-                                                        borderRadius: '0.75rem',
-                                                        overflow: 'hidden'
-                                                    }}
-                                                >
-                                                    <div style={{
-                                                        background: color,
-                                                        color: 'white',
-                                                        padding: '0.5rem 0.75rem',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        gap: '0.5rem',
-                                                        fontSize: '0.8rem',
-                                                        fontWeight: 600
-                                                    }}>
-                                                        <Icon size={14} />
-                                                        {post.platform}
-                                                    </div>
-                                                    <div style={{ padding: '0.75rem' }}>
-                                                        {post.title && (
-                                                            <div style={{
-                                                                fontWeight: 600,
-                                                                fontSize: '0.85rem',
-                                                                marginBottom: '0.5rem'
-                                                            }}>
-                                                                {post.title}
-                                                            </div>
-                                                        )}
-                                                        <div style={{
-                                                            fontSize: '0.8rem',
-                                                            color: '#444',
-                                                            lineHeight: 1.6,
-                                                            maxHeight: '200px',
-                                                            overflowY: 'auto',
-                                                            whiteSpace: 'pre-wrap'
-                                                        }}>
-                                                            {post.caption}
-                                                        </div>
-                                                        <div style={{
-                                                            display: 'flex',
-                                                            justifyContent: 'space-between',
-                                                            alignItems: 'center',
-                                                            marginTop: '0.75rem',
-                                                            paddingTop: '0.5rem',
-                                                            borderTop: '1px solid #f3f4f6'
-                                                        }}>
-                                                            <span style={{ fontSize: '0.7rem', color: '#999' }}>
-                                                                {post.caption?.length || 0} chars
-                                                            </span>
-                                                            <button
-                                                                onClick={() => copyToClipboard(post.caption, postId)}
-                                                                className="btn"
-                                                                style={{
-                                                                    padding: '0.25rem 0.5rem',
-                                                                    fontSize: '0.7rem',
-                                                                    gap: '0.3rem',
-                                                                    background: copiedId === postId ? '#10b981' : undefined,
-                                                                    color: copiedId === postId ? 'white' : undefined
-                                                                }}
-                                                            >
-                                                                {copiedId === postId ? <Check size={12} /> : <Copy size={12} />}
-                                                                {copiedId === postId ? 'Copied!' : 'Copy'}
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleSavePost(post, idx)}
-                                                                disabled={savingPostId === postId || savedPostIds.has(postId)}
-                                                                className="btn"
-                                                                style={{
-                                                                    padding: '0.25rem 0.5rem',
-                                                                    fontSize: '0.7rem',
-                                                                    gap: '0.3rem',
-                                                                    background: savedPostIds.has(postId) ? '#10b981' : savingPostId === postId ? '#9ca3af' : '#8b5cf6',
-                                                                    color: 'white'
-                                                                }}
-                                                            >
-                                                                {savingPostId === postId ? (
-                                                                    <><Loader2 size={12} className="animate-spin" /> Saving...</>
-                                                                ) : savedPostIds.has(postId) ? (
-                                                                    <><Check size={12} /> Saved</>
-                                                                ) : (
-                                                                    <><Save size={12} /> Save</>
-                                                                )}
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Image Results */}
-                            {activeResultTab === 'images' && imageResults && (
-                                <div>
-                                    {imageResults.imageUrl && (
-                                        <div style={{ marginBottom: '1rem' }}>
-                                            <img
-                                                src={imageResults.imageUrl}
-                                                alt="Generated"
-                                                style={{
-                                                    width: '100%',
-                                                    maxHeight: '300px',
-                                                    objectFit: 'cover',
-                                                    borderRadius: '0.75rem'
-                                                }}
-                                            />
-                                            <div style={{
-                                                display: 'flex',
-                                                gap: '0.5rem',
-                                                marginTop: '0.75rem'
-                                            }}>
-                                                <a
-                                                    href={imageResults.imageUrl}
-                                                    download
-                                                    className="btn"
-                                                    style={{
-                                                        flex: 1,
-                                                        padding: '0.5rem',
-                                                        fontSize: '0.8rem',
-                                                        textDecoration: 'none'
-                                                    }}
-                                                >
-                                                    <Download size={14} /> Download Image
-                                                </a>
-                                                <button
-                                                    onClick={handleSaveImage}
-                                                    disabled={isSavingImage || !!imageSavedId}
-                                                    className="btn btn-primary"
-                                                    style={{
-                                                        flex: 1,
-                                                        padding: '0.5rem',
-                                                        fontSize: '0.8rem',
-                                                        gap: '0.4rem',
-                                                        background: imageSavedId
-                                                            ? '#10b981'
-                                                            : isSavingImage
-                                                                ? '#9ca3af'
-                                                                : undefined
-                                                    }}
-                                                >
-                                                    {isSavingImage ? (
-                                                        <>
-                                                            <Loader2 size={14} className="animate-spin" />
-                                                            Saving...
-                                                        </>
-                                                    ) : imageSavedId ? (
-                                                        <>
-                                                            <Check size={14} />
-                                                            Saved!
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Save size={14} />
-                                                            Save to Library
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-                                    {!imageResults.imageUrl && (
-                                        <div style={{
-                                            textAlign: 'center',
-                                            padding: '2rem',
-                                            color: '#999'
-                                        }}>
-                                            No image URL returned. Check the prompt or try again.
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Video Results */}
-                            {activeResultTab === 'videos' && videoResults && (
-                                <div>
-                                    {videoResults.videoUrl && (
-                                        <div style={{ marginBottom: '1rem' }}>
-                                            <video
-                                                src={videoResults.videoUrl}
-                                                controls
-                                                style={{
-                                                    width: '100%',
-                                                    maxHeight: '300px',
-                                                    borderRadius: '0.75rem',
-                                                    background: '#000'
-                                                }}
-                                            />
-                                            <div style={{
-                                                display: 'flex',
-                                                gap: '0.5rem',
-                                                marginTop: '0.75rem'
-                                            }}>
-                                                <a
-                                                    href={videoResults.videoUrl}
-                                                    download
-                                                    className="btn"
-                                                    style={{
-                                                        flex: 1,
-                                                        padding: '0.5rem',
-                                                        fontSize: '0.8rem',
-                                                        textDecoration: 'none'
-                                                    }}
-                                                >
-                                                    <Download size={14} /> Download Video
-                                                </a>
-                                                <button
-                                                    onClick={handleSaveVideoToLibrary}
-                                                    disabled={isSavingVideo || !!videoSavedId}
-                                                    className="btn btn-primary"
-                                                    style={{
-                                                        flex: 1,
-                                                        padding: '0.5rem',
-                                                        fontSize: '0.8rem',
-                                                        gap: '0.4rem',
-                                                        background: videoSavedId
-                                                            ? '#10b981'
-                                                            : isSavingVideo
-                                                                ? '#9ca3af'
-                                                                : undefined
-                                                    }}
-                                                >
-                                                    {isSavingVideo ? (
-                                                        <>
-                                                            <Loader2 size={14} className="animate-spin" />
-                                                            Saving...
-                                                        </>
-                                                    ) : videoSavedId ? (
-                                                        <>
-                                                            <Check size={14} />
-                                                            Saved to Library!
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Save size={14} />
-                                                            Save to Library
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Video Posts */}
-                                    <div style={{
-                                        display: 'grid',
-                                        gridTemplateColumns: 'repeat(2, 1fr)',
-                                        gap: '0.75rem',
-                                        marginTop: '1rem'
-                                    }}>
-                                        {Object.entries(videoResults.posts).map(([platform, content]) => {
-                                            if (!content || typeof content === 'object' && !content.title) return null;
-                                            const Icon = getPlatformIcon(platform);
-                                            const color = getPlatformColor(platform);
-                                            const text = typeof content === 'string' ? content : content.description || content.title;
-
-                                            return (
-                                                <div
-                                                    key={platform}
-                                                    style={{
-                                                        background: 'white',
-                                                        border: '1px solid #e5e7eb',
-                                                        borderRadius: '0.75rem',
-                                                        overflow: 'hidden'
-                                                    }}
-                                                >
-                                                    <div style={{
-                                                        background: color,
-                                                        color: 'white',
-                                                        padding: '0.4rem 0.6rem',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        gap: '0.4rem',
-                                                        fontSize: '0.75rem',
-                                                        fontWeight: 600,
-                                                        textTransform: 'capitalize'
-                                                    }}>
-                                                        <Icon size={12} />
-                                                        {platform}
-                                                    </div>
-                                                    <div style={{
-                                                        padding: '0.6rem',
-                                                        fontSize: '0.75rem',
-                                                        color: '#444',
-                                                        maxHeight: '80px',
-                                                        overflowY: 'auto'
-                                                    }}>
-                                                        {text}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* No Results */}
-                            {activeResultTab === 'posts' && postResults.length === 0 && (
-                                <div style={{ textAlign: 'center', padding: '2rem', color: '#999' }}>
-                                    <Sparkles size={32} style={{ marginBottom: '0.5rem', opacity: 0.3 }} />
-                                    <p>Generate posts to see results here</p>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {/* RIGHT PANEL - History & Status */}
-                <div>
-                    {/* Status Card */}
-                    {(isLoading.posts || isLoading.images || isLoading.videos) && (
-                        <div className="card" style={{
-                            padding: '1.5rem',
-                            marginBottom: '1rem',
-                            background: 'linear-gradient(135deg, rgba(107, 73, 132, 0.05), rgba(212, 175, 55, 0.05))',
-                            textAlign: 'center'
-                        }}>
-                            <div style={{
-                                width: '60px',
-                                height: '60px',
-                                margin: '0 auto 1rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                            }}>
-                                <div className="animate-pulse" style={{ fontSize: '2.5rem' }}>🦋</div>
-                            </div>
-                            <p style={{ fontWeight: 600, color: 'var(--color-primary)', marginBottom: '0.25rem' }}>
-                                Transforming...
-                            </p>
-                            <p style={{ fontSize: '0.8rem', color: '#999' }}>
-                                {isLoading.posts && 'Creating post content...'}
-                                {isLoading.images && 'Generating images with AI...'}
-                                {isLoading.videos && 'Creating video (may take 60s)...'}
-                            </p>
-                        </div>
-                    )}
-
-                    {/* Recent Generations */}
-                    <div className="card" style={{ padding: '1.5rem' }}>
-                        <h4 style={{
-                            fontSize: '0.75rem',
-                            fontWeight: 700,
-                            color: '#999',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.1em',
-                            marginBottom: '1rem'
-                        }}>
-                            Generation History
-                        </h4>
-
-                        {history.length > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                {history.map(item => (
-                                    <div
-                                        key={item.id}
-                                        style={{
-                                            padding: '0.75rem',
-                                            background: '#f9f9f9',
-                                            borderRadius: '0.5rem',
-                                            borderLeft: `3px solid ${item.status === 'complete' ? '#10b981' :
-                                                item.status === 'error' ? '#ef4444' : '#f59e0b'
-                                                }`
-                                        }}
-                                    >
-                                        <div style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            marginBottom: '0.25rem'
-                                        }}>
-                                            <span style={{
-                                                fontSize: '0.8rem',
-                                                fontWeight: 600,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '0.3rem'
-                                            }}>
-                                                {item.type === 'Post' && <FileText size={12} />}
-                                                {item.type === 'Image' && <ImageIcon size={12} />}
-                                                {item.type === 'Video' && <Video size={12} />}
-                                                {item.type}
-                                            </span>
-                                            {item.status === 'complete' && <Check size={14} color="#10b981" />}
-                                            {item.status === 'error' && <AlertCircle size={14} color="#ef4444" />}
-                                            {item.status === 'pending' && <Clock size={14} color="#f59e0b" />}
-                                        </div>
-                                        <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>
-                                            {item.chapterTitle}
-                                        </div>
-                                        <div style={{ fontSize: '0.7rem', color: '#999' }}>
-                                            Started: {item.timestamp.toLocaleTimeString()}
-                                            {item.retryCount && item.retryCount > 0 && (
-                                                <span style={{ marginLeft: '0.5rem', color: '#f59e0b' }}>
-                                                    • Retry #{item.retryCount} at {item.lastRetryTime?.toLocaleTimeString() || 'unknown'}
-                                                </span>
-                                            )}
-                                        </div>
-                                        {item.errorMessage && (
-                                            <div style={{
-                                                fontSize: '0.7rem',
-                                                color: '#ef4444',
-                                                marginTop: '0.25rem'
-                                            }}>
-                                                {item.errorMessage.substring(0, 50)}...
-                                            </div>
-                                        )}
-                                        {/* Retry button for failed/pending items */}
-                                        {(item.status === 'error' || item.status === 'pending') && item.payload && (
+                        {/* Results Tabs */}
+                        {showResults && (
+                            <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '1.5rem' }}>
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    marginBottom: '1rem'
+                                }}>
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        {['posts', 'images', 'videos'].map(tab => (
                                             <button
-                                                onClick={() => retryFromHistory(item)}
-                                                disabled={isLoading[item.type.toLowerCase() + 's' as keyof typeof isLoading]}
+                                                key={tab}
+                                                onClick={() => setActiveResultTab(tab as 'posts' | 'images' | 'videos')}
                                                 className="btn"
                                                 style={{
-                                                    marginTop: '0.5rem',
-                                                    padding: '0.3rem 0.6rem',
-                                                    fontSize: '0.7rem',
-                                                    width: '100%',
-                                                    background: isLoading[item.type.toLowerCase() + 's' as keyof typeof isLoading]
-                                                        ? '#e5e7eb'
-                                                        : item.status === 'pending' ? '#f59e0b' : '#ef4444',
-                                                    color: 'white',
-                                                    border: 'none'
+                                                    padding: '0.4rem 0.75rem',
+                                                    fontSize: '0.8rem',
+                                                    background: activeResultTab === tab ? 'var(--color-primary)' : '#f3f4f6',
+                                                    color: activeResultTab === tab ? 'white' : '#666',
+                                                    border: 'none',
+                                                    textTransform: 'capitalize'
                                                 }}
                                             >
-                                                {isLoading[item.type.toLowerCase() + 's' as keyof typeof isLoading] ? (
-                                                    <>
-                                                        <Loader2 size={12} className="animate-spin" style={{ marginRight: '0.3rem' }} />
-                                                        Retrying...
-                                                    </>
-                                                ) : item.status === 'pending' ? (
-                                                    <>
-                                                        <RefreshCw size={12} style={{ marginRight: '0.3rem' }} />
-                                                        Check Status
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <RefreshCw size={12} style={{ marginRight: '0.3rem' }} />
-                                                        Retry
-                                                    </>
-                                                )}
+                                                {tab}
                                             </button>
+                                        ))}
+                                    </div>
+                                    <button
+                                        onClick={() => setShowResults(false)}
+                                        className="btn"
+                                        style={{ padding: '0.3rem', fontSize: '0.7rem' }}
+                                    >
+                                        <ChevronUp size={14} />
+                                    </button>
+                                </div>
+
+                                {/* Posts Results */}
+                                {activeResultTab === 'posts' && postResults.length > 0 && (
+                                    <div>
+                                        <div style={{
+                                            display: 'flex',
+                                            justifyContent: 'flex-end',
+                                            marginBottom: '0.75rem'
+                                        }}>
+                                            <button
+                                                onClick={handleSaveAllPosts}
+                                                className="btn btn-primary"
+                                                style={{
+                                                    padding: '0.4rem 0.75rem',
+                                                    fontSize: '0.75rem',
+                                                    gap: '0.3rem'
+                                                }}
+                                            >
+                                                <Save size={12} />
+                                                Save All Posts to Library
+                                            </button>
+                                        </div>
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: 'repeat(2, 1fr)',
+                                            gap: '0.75rem',
+                                            maxHeight: '400px',
+                                            overflowY: 'auto'
+                                        }}>
+                                            {postResults.map((post, idx) => {
+                                                const Icon = getPlatformIcon(post.platform);
+                                                const color = getPlatformColor(post.platform);
+                                                const postId = `post-${idx}`;
+
+                                                return (
+                                                    <div
+                                                        key={idx}
+                                                        style={{
+                                                            background: 'white',
+                                                            border: '1px solid #e5e7eb',
+                                                            borderRadius: '0.75rem',
+                                                            overflow: 'hidden'
+                                                        }}
+                                                    >
+                                                        <div style={{
+                                                            background: color,
+                                                            color: 'white',
+                                                            padding: '0.5rem 0.75rem',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '0.5rem',
+                                                            fontSize: '0.8rem',
+                                                            fontWeight: 600
+                                                        }}>
+                                                            <Icon size={14} />
+                                                            {post.platform}
+                                                        </div>
+                                                        <div style={{ padding: '0.75rem' }}>
+                                                            {post.title && (
+                                                                <div style={{
+                                                                    fontWeight: 600,
+                                                                    fontSize: '0.85rem',
+                                                                    marginBottom: '0.5rem'
+                                                                }}>
+                                                                    {post.title}
+                                                                </div>
+                                                            )}
+                                                            <div style={{
+                                                                fontSize: '0.8rem',
+                                                                color: '#444',
+                                                                lineHeight: 1.6,
+                                                                maxHeight: '200px',
+                                                                overflowY: 'auto',
+                                                                whiteSpace: 'pre-wrap'
+                                                            }}>
+                                                                {post.caption}
+                                                            </div>
+                                                            <div style={{
+                                                                display: 'flex',
+                                                                justifyContent: 'space-between',
+                                                                alignItems: 'center',
+                                                                marginTop: '0.75rem',
+                                                                paddingTop: '0.5rem',
+                                                                borderTop: '1px solid #f3f4f6'
+                                                            }}>
+                                                                <span style={{ fontSize: '0.7rem', color: '#999' }}>
+                                                                    {post.caption?.length || 0} chars
+                                                                </span>
+                                                                <button
+                                                                    onClick={() => copyToClipboard(post.caption, postId)}
+                                                                    className="btn"
+                                                                    style={{
+                                                                        padding: '0.25rem 0.5rem',
+                                                                        fontSize: '0.7rem',
+                                                                        gap: '0.3rem',
+                                                                        background: copiedId === postId ? '#10b981' : undefined,
+                                                                        color: copiedId === postId ? 'white' : undefined
+                                                                    }}
+                                                                >
+                                                                    {copiedId === postId ? <Check size={12} /> : <Copy size={12} />}
+                                                                    {copiedId === postId ? 'Copied!' : 'Copy'}
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleSavePost(post, idx)}
+                                                                    disabled={savingPostId === postId || savedPostIds.has(postId)}
+                                                                    className="btn"
+                                                                    style={{
+                                                                        padding: '0.25rem 0.5rem',
+                                                                        fontSize: '0.7rem',
+                                                                        gap: '0.3rem',
+                                                                        background: savedPostIds.has(postId) ? '#10b981' : savingPostId === postId ? '#9ca3af' : '#8b5cf6',
+                                                                        color: 'white'
+                                                                    }}
+                                                                >
+                                                                    {savingPostId === postId ? (
+                                                                        <><Loader2 size={12} className="animate-spin" /> Saving...</>
+                                                                    ) : savedPostIds.has(postId) ? (
+                                                                        <><Check size={12} /> Saved</>
+                                                                    ) : (
+                                                                        <><Save size={12} /> Save</>
+                                                                    )}
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Image Results */}
+                                {activeResultTab === 'images' && imageResults && (
+                                    <div>
+                                        {imageResults.imageUrl && (
+                                            <div style={{ marginBottom: '1rem' }}>
+                                                <img
+                                                    src={imageResults.imageUrl}
+                                                    alt="Generated"
+                                                    style={{
+                                                        width: '100%',
+                                                        maxHeight: '300px',
+                                                        objectFit: 'cover',
+                                                        borderRadius: '0.75rem'
+                                                    }}
+                                                />
+                                                <div style={{
+                                                    display: 'flex',
+                                                    gap: '0.5rem',
+                                                    marginTop: '0.75rem'
+                                                }}>
+                                                    <a
+                                                        href={imageResults.imageUrl}
+                                                        download
+                                                        className="btn"
+                                                        style={{
+                                                            flex: 1,
+                                                            padding: '0.5rem',
+                                                            fontSize: '0.8rem',
+                                                            textDecoration: 'none'
+                                                        }}
+                                                    >
+                                                        <Download size={14} /> Download Image
+                                                    </a>
+                                                    <button
+                                                        onClick={handleSaveImage}
+                                                        disabled={isSavingImage || !!imageSavedId}
+                                                        className="btn btn-primary"
+                                                        style={{
+                                                            flex: 1,
+                                                            padding: '0.5rem',
+                                                            fontSize: '0.8rem',
+                                                            gap: '0.4rem',
+                                                            background: imageSavedId
+                                                                ? '#10b981'
+                                                                : isSavingImage
+                                                                    ? '#9ca3af'
+                                                                    : undefined
+                                                        }}
+                                                    >
+                                                        {isSavingImage ? (
+                                                            <>
+                                                                <Loader2 size={14} className="animate-spin" />
+                                                                Saving...
+                                                            </>
+                                                        ) : imageSavedId ? (
+                                                            <>
+                                                                <Check size={14} />
+                                                                Saved!
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Save size={14} />
+                                                                Save to Library
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {!imageResults.imageUrl && (
+                                            <div style={{
+                                                textAlign: 'center',
+                                                padding: '2rem',
+                                                color: '#999'
+                                            }}>
+                                                No image URL returned. Check the prompt or try again.
+                                            </div>
                                         )}
                                     </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div style={{
-                                textAlign: 'center',
-                                padding: '2rem 1rem',
-                                color: '#ccc'
-                            }}>
-                                <Clock size={24} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
-                                <p style={{ fontSize: '0.8rem' }}>No generations yet</p>
+                                )}
+
+                                {/* Video Results */}
+                                {activeResultTab === 'videos' && videoResults && (
+                                    <div>
+                                        {videoResults.videoUrl && (
+                                            <div style={{ marginBottom: '1rem' }}>
+                                                <video
+                                                    src={videoResults.videoUrl}
+                                                    controls
+                                                    style={{
+                                                        width: '100%',
+                                                        maxHeight: '300px',
+                                                        borderRadius: '0.75rem',
+                                                        background: '#000'
+                                                    }}
+                                                />
+                                                <div style={{
+                                                    display: 'flex',
+                                                    gap: '0.5rem',
+                                                    marginTop: '0.75rem'
+                                                }}>
+                                                    <a
+                                                        href={videoResults.videoUrl}
+                                                        download
+                                                        className="btn"
+                                                        style={{
+                                                            flex: 1,
+                                                            padding: '0.5rem',
+                                                            fontSize: '0.8rem',
+                                                            textDecoration: 'none'
+                                                        }}
+                                                    >
+                                                        <Download size={14} /> Download Video
+                                                    </a>
+                                                    <button
+                                                        onClick={handleSaveVideoToLibrary}
+                                                        disabled={isSavingVideo || !!videoSavedId}
+                                                        className="btn btn-primary"
+                                                        style={{
+                                                            flex: 1,
+                                                            padding: '0.5rem',
+                                                            fontSize: '0.8rem',
+                                                            gap: '0.4rem',
+                                                            background: videoSavedId
+                                                                ? '#10b981'
+                                                                : isSavingVideo
+                                                                    ? '#9ca3af'
+                                                                    : undefined
+                                                        }}
+                                                    >
+                                                        {isSavingVideo ? (
+                                                            <>
+                                                                <Loader2 size={14} className="animate-spin" />
+                                                                Saving...
+                                                            </>
+                                                        ) : videoSavedId ? (
+                                                            <>
+                                                                <Check size={14} />
+                                                                Saved to Library!
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Save size={14} />
+                                                                Save to Library
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Video Posts */}
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: 'repeat(2, 1fr)',
+                                            gap: '0.75rem',
+                                            marginTop: '1rem'
+                                        }}>
+                                            {Object.entries(videoResults.posts).map(([platform, content]) => {
+                                                if (!content || typeof content === 'object' && !content.title) return null;
+                                                const Icon = getPlatformIcon(platform);
+                                                const color = getPlatformColor(platform);
+                                                const text = typeof content === 'string' ? content : content.description || content.title;
+
+                                                return (
+                                                    <div
+                                                        key={platform}
+                                                        style={{
+                                                            background: 'white',
+                                                            border: '1px solid #e5e7eb',
+                                                            borderRadius: '0.75rem',
+                                                            overflow: 'hidden'
+                                                        }}
+                                                    >
+                                                        <div style={{
+                                                            background: color,
+                                                            color: 'white',
+                                                            padding: '0.4rem 0.6rem',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '0.4rem',
+                                                            fontSize: '0.75rem',
+                                                            fontWeight: 600,
+                                                            textTransform: 'capitalize'
+                                                        }}>
+                                                            <Icon size={12} />
+                                                            {platform}
+                                                        </div>
+                                                        <div style={{
+                                                            padding: '0.6rem',
+                                                            fontSize: '0.75rem',
+                                                            color: '#444',
+                                                            maxHeight: '80px',
+                                                            overflowY: 'auto'
+                                                        }}>
+                                                            {text}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* No Results */}
+                                {activeResultTab === 'posts' && postResults.length === 0 && (
+                                    <div style={{ textAlign: 'center', padding: '2rem', color: '#999' }}>
+                                        <Sparkles size={32} style={{ marginBottom: '0.5rem', opacity: 0.3 }} />
+                                        <p>Generate posts to see results here</p>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
 
-                    {/* Webhook Info */}
-                    <div style={{
-                        marginTop: '1rem',
-                        padding: '0.75rem',
-                        background: '#f9f9f9',
-                        borderRadius: '0.5rem',
-                        fontSize: '0.7rem',
-                        color: '#999'
-                    }}>
-                        <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                            n8n Webhook
+                    {/* RIGHT PANEL - History & Status */}
+                    <div>
+                        {/* Status Card */}
+                        {(isLoading.posts || isLoading.images || isLoading.videos) && (
+                            <div className="card" style={{
+                                padding: '1.5rem',
+                                marginBottom: '1rem',
+                                background: 'linear-gradient(135deg, rgba(107, 73, 132, 0.05), rgba(212, 175, 55, 0.05))',
+                                textAlign: 'center'
+                            }}>
+                                <div style={{
+                                    width: '60px',
+                                    height: '60px',
+                                    margin: '0 auto 1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}>
+                                    <div className="animate-pulse" style={{ fontSize: '2.5rem' }}>🦋</div>
+                                </div>
+                                <p style={{ fontWeight: 600, color: 'var(--color-primary)', marginBottom: '0.25rem' }}>
+                                    Transforming...
+                                </p>
+                                <p style={{ fontSize: '0.8rem', color: '#999' }}>
+                                    {isLoading.posts && 'Creating post content...'}
+                                    {isLoading.images && 'Generating images with AI...'}
+                                    {isLoading.videos && 'Creating video (may take 60s)...'}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Recent Generations */}
+                        <div className="card" style={{ padding: '1.5rem' }}>
+                            <h4 style={{
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                color: '#999',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.1em',
+                                marginBottom: '1rem'
+                            }}>
+                                Generation History
+                            </h4>
+
+                            {history.length > 0 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    {history.map(item => (
+                                        <div
+                                            key={item.id}
+                                            style={{
+                                                padding: '0.75rem',
+                                                background: '#f9f9f9',
+                                                borderRadius: '0.5rem',
+                                                borderLeft: `3px solid ${item.status === 'complete' ? '#10b981' :
+                                                    item.status === 'error' ? '#ef4444' : '#f59e0b'
+                                                    }`
+                                            }}
+                                        >
+                                            <div style={{
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                                marginBottom: '0.25rem'
+                                            }}>
+                                                <span style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 600,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.3rem'
+                                                }}>
+                                                    {item.type === 'Post' && <FileText size={12} />}
+                                                    {item.type === 'Image' && <ImageIcon size={12} />}
+                                                    {item.type === 'Video' && <Video size={12} />}
+                                                    {item.type}
+                                                </span>
+                                                {item.status === 'complete' && <Check size={14} color="#10b981" />}
+                                                {item.status === 'error' && <AlertCircle size={14} color="#ef4444" />}
+                                                {item.status === 'pending' && <Clock size={14} color="#f59e0b" />}
+                                            </div>
+                                            <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>
+                                                {item.chapterTitle}
+                                            </div>
+                                            <div style={{ fontSize: '0.7rem', color: '#999' }}>
+                                                Started: {item.timestamp.toLocaleTimeString()}
+                                                {item.retryCount && item.retryCount > 0 && (
+                                                    <span style={{ marginLeft: '0.5rem', color: '#f59e0b' }}>
+                                                        • Retry #{item.retryCount} at {item.lastRetryTime?.toLocaleTimeString() || 'unknown'}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {item.errorMessage && (
+                                                <div style={{
+                                                    fontSize: '0.7rem',
+                                                    color: '#ef4444',
+                                                    marginTop: '0.25rem'
+                                                }}>
+                                                    {item.errorMessage.substring(0, 50)}...
+                                                </div>
+                                            )}
+                                            {/* Retry button for failed/pending items */}
+                                            {(item.status === 'error' || item.status === 'pending') && item.payload && (
+                                                <button
+                                                    onClick={() => retryFromHistory(item)}
+                                                    disabled={isLoading[item.type.toLowerCase() + 's' as keyof typeof isLoading]}
+                                                    className="btn"
+                                                    style={{
+                                                        marginTop: '0.5rem',
+                                                        padding: '0.3rem 0.6rem',
+                                                        fontSize: '0.7rem',
+                                                        width: '100%',
+                                                        background: isLoading[item.type.toLowerCase() + 's' as keyof typeof isLoading]
+                                                            ? '#e5e7eb'
+                                                            : item.status === 'pending' ? '#f59e0b' : '#ef4444',
+                                                        color: 'white',
+                                                        border: 'none'
+                                                    }}
+                                                >
+                                                    {isLoading[item.type.toLowerCase() + 's' as keyof typeof isLoading] ? (
+                                                        <>
+                                                            <Loader2 size={12} className="animate-spin" style={{ marginRight: '0.3rem' }} />
+                                                            Retrying...
+                                                        </>
+                                                    ) : item.status === 'pending' ? (
+                                                        <>
+                                                            <RefreshCw size={12} style={{ marginRight: '0.3rem' }} />
+                                                            Check Status
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <RefreshCw size={12} style={{ marginRight: '0.3rem' }} />
+                                                            Retry
+                                                        </>
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div style={{
+                                    textAlign: 'center',
+                                    padding: '2rem 1rem',
+                                    color: '#ccc'
+                                }}>
+                                    <Clock size={24} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                                    <p style={{ fontSize: '0.8rem' }}>No generations yet</p>
+                                </div>
+                            )}
                         </div>
-                        <div style={{ wordBreak: 'break-all' }}>
-                            {N8N_WEBHOOK_URL.replace('https://', '').substring(0, 30)}...
+
+                        {/* Webhook Info */}
+                        <div style={{
+                            marginTop: '1rem',
+                            padding: '0.75rem',
+                            background: '#f9f9f9',
+                            borderRadius: '0.5rem',
+                            fontSize: '0.7rem',
+                            color: '#999'
+                        }}>
+                            <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                                n8n Webhook
+                            </div>
+                            <div style={{ wordBreak: 'break-all' }}>
+                                {N8N_WEBHOOK_URL.replace('https://', '').substring(0, 30)}...
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            )}
+
+            {/* Library View Mode */}
+            {viewMode === 'library' && (
+                <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>Filter by Chapter:</label>
+                            <select value={selectedChapterId} onChange={(e) => setSelectedChapterId(e.target.value)} className="status-select" style={{ minWidth: '200px' }}>
+                                <option value="">All Chapters</option>
+                                {chapters.map(c => (<option key={c.id} value={c.id}>Ch. {c.chapterNumber}: {c.title}</option>))}
+                            </select>
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={showArchivedLibrary} onChange={(e) => setShowArchivedLibrary(e.target.checked)} /> Show Archived
+                        </label>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '2px solid #e5e7eb' }}>
+                        {[{ id: 'posts', label: 'Posts', count: filteredPosts.length, icon: FileText }, { id: 'images', label: 'Images', count: filteredImages.length, icon: ImageIcon }, { id: 'videos', label: 'Videos', count: filteredVideos.length, icon: Video }].map(tab => (
+                            <button key={tab.id} onClick={() => setLibraryTab(tab.id as 'posts' | 'images' | 'videos')} style={{ padding: '0.75rem 1.5rem', fontSize: '0.9rem', fontWeight: 600, background: 'transparent', color: libraryTab === tab.id ? 'var(--color-primary)' : '#666', border: 'none', borderBottom: libraryTab === tab.id ? '2px solid var(--color-primary)' : '2px solid transparent', marginBottom: '-2px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <tab.icon size={16} /> {tab.label} <span style={{ background: libraryTab === tab.id ? 'var(--color-primary)' : '#e5e7eb', color: libraryTab === tab.id ? 'white' : '#666', padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.75rem' }}>{tab.count}</span>
+                            </button>
+                        ))}
+                    </div>
+                    {libraryLoading && <div style={{ textAlign: 'center', padding: '3rem', color: '#999' }}><Loader2 size={32} className="animate-spin" style={{ margin: '0 auto 1rem' }} /><p>Loading your library...</p></div>}
+                    {!libraryLoading && libraryTab === 'posts' && (
+                        <div>
+                            {filteredPosts.length === 0 ? <div style={{ textAlign: 'center', padding: '3rem', color: '#999' }}><FileText size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} /><p>No saved posts yet</p><p style={{ fontSize: '0.85rem' }}>Generate and save posts to see them here</p></div> : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+                                    {filteredPosts.map(post => (
+                                        <div key={post.id} className="card" style={{ padding: '1rem', opacity: post.archived ? 0.6 : 1 }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                                                <span style={{ background: getPlatformColor(post.platform), color: 'white', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 600 }}>{post.platform}</span>
+                                                <span style={{ fontSize: '0.7rem', color: '#999' }}>{post.createdAt.toDate().toLocaleDateString()}</span>
+                                            </div>
+                                            {post.title && <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.9rem' }}>{post.title}</div>}
+                                            <div style={{ fontSize: '0.85rem', color: '#444', lineHeight: 1.6, maxHeight: '120px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{post.content.substring(0, 300)}{post.content.length > 300 ? '...' : ''}</div>
+                                            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #f3f4f6' }}>
+                                                <button onClick={() => copyToClipboard(post.content, post.id)} className="btn" style={{ flex: 1, padding: '0.4rem', fontSize: '0.75rem' }}>{copiedId === post.id ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}</button>
+                                            </div>
+                                            <div style={{ fontSize: '0.7rem', color: '#999', marginTop: '0.5rem' }}>{post.chapterTitle}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {!libraryLoading && libraryTab === 'images' && (
+                        <div>
+                            {filteredImages.length === 0 ? <div style={{ textAlign: 'center', padding: '3rem', color: '#999' }}><ImageIcon size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} /><p>No saved images yet</p></div> : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1rem' }}>
+                                    {filteredImages.map(image => (
+                                        <div key={image.id} className="card" style={{ overflow: 'hidden', opacity: image.archived ? 0.6 : 1 }}>
+                                            <img src={image.imageUrl} alt={image.prompt} style={{ width: '100%', height: '200px', objectFit: 'cover' }} />
+                                            <div style={{ padding: '1rem' }}>
+                                                <div style={{ fontSize: '0.85rem', color: '#444', marginBottom: '0.5rem' }}>{image.prompt.substring(0, 100)}{image.prompt.length > 100 ? '...' : ''}</div>
+                                                <div style={{ fontSize: '0.7rem', color: '#999' }}>{image.chapterTitle} • {image.createdAt.toDate().toLocaleDateString()}</div>
+                                                <a href={image.imageUrl} download className="btn" style={{ display: 'flex', width: '100%', justifyContent: 'center', marginTop: '0.75rem', padding: '0.4rem', fontSize: '0.75rem', textDecoration: 'none' }}><Download size={12} style={{ marginRight: '0.3rem' }} /> Download</a>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {!libraryLoading && libraryTab === 'videos' && (
+                        <div>
+                            {filteredVideos.length === 0 ? <div style={{ textAlign: 'center', padding: '3rem', color: '#999' }}><Video size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} /><p>No saved videos yet</p></div> : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+                                    {filteredVideos.map(video => (
+                                        <div key={video.id} className="card" style={{ overflow: 'hidden', opacity: video.archived ? 0.6 : 1 }}>
+                                            <video src={video.videoUrl} controls style={{ width: '100%', height: '200px', objectFit: 'cover', background: '#000' }} />
+                                            <div style={{ padding: '1rem' }}>
+                                                <div style={{ fontSize: '0.85rem', color: '#444', marginBottom: '0.5rem' }}>{video.prompt.substring(0, 100)}{video.prompt.length > 100 ? '...' : ''}</div>
+                                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>{video.platforms?.map(p => <span key={p} style={{ background: '#f3f4f6', padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.65rem' }}>{p}</span>)}</div>
+                                                <div style={{ fontSize: '0.7rem', color: '#999' }}>{video.chapterTitle} • {video.createdAt.toDate().toLocaleDateString()}</div>
+                                                <a href={video.videoUrl} download className="btn" style={{ display: 'flex', width: '100%', justifyContent: 'center', marginTop: '0.75rem', padding: '0.4rem', fontSize: '0.75rem', textDecoration: 'none' }}><Download size={12} style={{ marginRight: '0.3rem' }} /> Download</a>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
