@@ -854,12 +854,20 @@ const SocialMediaRepurpose = () => {
                 }
                 setActiveResultTab('images');
             } else if (type === 'Video') {
-                // Handle video response from n8n - expects { videoUrl: string }
-                const videoData = data as { videoUrl?: string; video_url?: string; url?: string };
-                const videoUrl = videoData.videoUrl || videoData.video_url || videoData.url;
+                // Handle video response from n8n
+                // n8n returns: { video: { url: "..." } } or { videoUrl: "..." } or { url: "..." }
+                const videoData = data as {
+                    video?: { url?: string };
+                    videoUrl?: string;
+                    video_url?: string;
+                    url?: string
+                };
+                const videoUrl = videoData.video?.url || videoData.videoUrl || videoData.video_url || videoData.url;
+
+                console.log('n8n response data:', data);
+                console.log('Extracted video URL:', videoUrl);
 
                 if (videoUrl) {
-                    console.log('Video URL from n8n:', videoUrl);
                     setVideoResults({
                         videoUrl: videoUrl,
                         videoPrompt: generatedVideoScene,
@@ -1157,8 +1165,8 @@ const SocialMediaRepurpose = () => {
                 }
                 setActiveResultTab('images');
             } else if (type === 'Video') {
-                const videoData = data as { videoUrl?: string; video_url?: string; url?: string };
-                const videoUrl = videoData.videoUrl || videoData.video_url || videoData.url;
+                const videoData = data as { video?: { url?: string }; videoUrl?: string; video_url?: string; url?: string };
+                const videoUrl = videoData.video?.url || videoData.videoUrl || videoData.video_url || videoData.url;
                 if (videoUrl) {
                     setVideoResults({
                         videoUrl: videoUrl,
