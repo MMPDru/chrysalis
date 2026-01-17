@@ -765,7 +765,7 @@ const SocialMediaRepurpose = () => {
         try {
             // All requests go through n8n webhook
             const controller = new AbortController();
-            const timeoutMs = type === 'Video' ? 300000 : 120000; // 5 mins for video, 2 mins for posts/images
+            const timeoutMs = type === 'Video' ? 600000 : 120000; // 10 mins for video, 2 mins for posts/images
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             console.log(`Sending ${type} request to n8n:`, payload);
@@ -1129,7 +1129,7 @@ const SocialMediaRepurpose = () => {
         try {
             // All retries go through n8n
             const controller = new AbortController();
-            const timeoutMs = type === 'Video' ? 300000 : 120000; // 5 mins for video, 2 mins for others
+            const timeoutMs = type === 'Video' ? 600000 : 120000; // 10 mins for video, 2 mins for others
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             console.log(`Retrying ${type} request:`, historyItem.payload);
