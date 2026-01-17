@@ -23,6 +23,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { subscribeToChapters, fetchLatestVersion } from '../lib/chapters';
 import { saveGeneratedVideo } from '../lib/visuals';
+import { generateVideoWithFal } from '../lib/fal';
+import { savePostToLibrary, saveImageToSocialLibrary, saveVideoToSocialLibrary } from '../lib/social';
 import type { Chapter } from '../lib/types';
 
 // N8N Webhook Configuration
@@ -72,10 +74,37 @@ interface ImageResult {
     posts: PostResult[];
 }
 
+// Video post content from n8n webhook
+interface VideoPostContent {
+    title?: string;
+    description?: string;
+    text?: string;
+}
+
 interface VideoResult {
     videoUrl: string;
     videoPrompt: string;
-    posts: Record<string, any>;
+    posts: Record<string, VideoPostContent | string>;
+}
+
+// Payload for webhook requests
+interface WebhookPayload {
+    type: string;
+    content: string;
+    chapter_title: string;
+    author_name: string;
+    brand: string;
+    tone: string;
+    chapter_context: string;
+    butterfly_theme: string;
+    wisdom_lessons: string;
+    author_voice: string;
+    request_id?: string;
+    // Optional fields for specific content types
+    content_request?: string;
+    topic?: string;
+    video_scene?: string;
+    source_text?: string;
 }
 
 interface GenerationHistory {
@@ -86,7 +115,7 @@ interface GenerationHistory {
     status: 'pending' | 'complete' | 'error';
     errorMessage?: string;
     // For retry/polling functionality
-    payload?: Record<string, any>;
+    payload?: WebhookPayload;
     retryCount?: number;
     lastRetryTime?: Date;
 }
@@ -95,28 +124,51 @@ interface GenerationHistory {
 
 /**
  * Parse markdown output from n8n into structured platform posts
- * Format: ### **Platform: Instagram** followed by content sections
+ * Handles multiple formats:
+ * - ### **Platform: Instagram** followed by content sections
+ * - ## **Instagram Post** followed by content sections
  */
 function parseMarkdownToPlatforms(markdownText: string): PostResult[] {
     const posts: PostResult[] = [];
 
-    // Split by platform headers like "### **Platform: Instagram**"
-    const platformRegex = /###\s*\*?\*?Platform:\s*(\w+)\*?\*?/gi;
-    const sections = markdownText.split(platformRegex);
+    // Try format 1: "### **Platform: Instagram**" or "## **Platform: Instagram**"
+    const platformRegex1 = /#{2,3}\s*\*?\*?Platform:\s*(\w+)\*?\*?/gi;
+
+    // Try format 2: "## **Instagram Post**" or "## **Instagram**"
+    const platformRegex2 = /#{2,3}\s*\*?\*?(Instagram|Facebook|Twitter|LinkedIn|Threads|Pinterest|X|TikTok)(?:\s+Post)?\*?\*?/gi;
+
+    let sections: string[] = [];
+    let usedRegex: RegExp | null = null;
+
+    // Try format 1 first
+    if (platformRegex1.test(markdownText)) {
+        platformRegex1.lastIndex = 0; // Reset regex
+        sections = markdownText.split(platformRegex1);
+        usedRegex = platformRegex1;
+    } else if (platformRegex2.test(markdownText)) {
+        platformRegex2.lastIndex = 0; // Reset regex
+        sections = markdownText.split(platformRegex2);
+        usedRegex = platformRegex2;
+    }
+
+    console.log('Parsing markdown with regex:', usedRegex?.source);
+    console.log('Sections found:', sections.length);
 
     // sections: [preamble, "Instagram", content, "Facebook", content, ...]
     for (let i = 1; i < sections.length; i += 2) {
         const platformName = sections[i]?.trim();
         const content = sections[i + 1]?.trim() || '';
 
+        console.log(`Processing platform: ${platformName}, content length: ${content.length}`);
+
         if (platformName && content) {
             // Extract the main content - look for Caption, Post, or just take the content
             let caption = content;
 
             // Try to extract specific sections
-            const captionMatch = content.match(/\*?\*?Caption:\*?\*?\s*\n([\s\S]*?)(?=\n---|\n###|$)/i);
-            const postMatch = content.match(/\*?\*?Post:\*?\*?\s*\n([\s\S]*?)(?=\n---|\n###|$)/i);
-            const textMatch = content.match(/\*?\*?Text:\*?\*?\s*\n([\s\S]*?)(?=\n---|\n###|$)/i);
+            const captionMatch = content.match(/\*?\*?Caption:\*?\*?\s*\n([\s\S]*?)(?=\n---|\n#{2,3}|$)/i);
+            const postMatch = content.match(/\*?\*?Post:\*?\*?\s*\n([\s\S]*?)(?=\n---|\n#{2,3}|$)/i);
+            const textMatch = content.match(/\*?\*?Text:\*?\*?\s*\n([\s\S]*?)(?=\n---|\n#{2,3}|$)/i);
 
             if (captionMatch) caption = captionMatch[1].trim();
             else if (postMatch) caption = postMatch[1].trim();
@@ -136,41 +188,68 @@ function parseMarkdownToPlatforms(markdownText: string): PostResult[] {
                 .replace(/\*/g, '')   // Remove italic markers
                 .trim();
 
+            // Normalize platform names
+            let normalizedPlatform = platformName;
+            if (platformName.toLowerCase() === 'x') normalizedPlatform = 'Twitter';
+
             posts.push({
-                platform: platformName,
+                platform: normalizedPlatform,
                 caption: caption
             });
         }
     }
 
+    console.log('Total posts parsed:', posts.length);
     return posts;
 }
 
-function parsePostResponse(response: any): PostResult[] {
-    // First check if it's markdown format (string in output field)
-    const outputText = response.output || response;
+function parsePostResponse(response: unknown): PostResult[] {
+    // Handle string response
+    if (typeof response === 'string') {
+        const hasMarkdownPlatforms =
+            response.includes('Platform:') ||
+            /#{2,3}\s*\*?\*?(Instagram|Facebook|Twitter|LinkedIn|Threads|Pinterest|X|TikTok)/i.test(response);
+        if (hasMarkdownPlatforms) {
+            return parseMarkdownToPlatforms(response);
+        }
+        return [];
+    }
 
-    if (typeof outputText === 'string' && outputText.includes('Platform:')) {
+    // Handle object response
+    const responseObj = response as Record<string, unknown>;
+    const outputText = responseObj.output || response;
+
+    // Check for various markdown formats
+    const hasMarkdownPlatforms = typeof outputText === 'string' && (
+        outputText.includes('Platform:') ||
+        /#{2,3}\s*\*?\*?(Instagram|Facebook|Twitter|LinkedIn|Threads|Pinterest|X|TikTok)/i.test(outputText)
+    );
+
+    console.log('parsePostResponse - hasMarkdownPlatforms:', hasMarkdownPlatforms);
+
+    if (hasMarkdownPlatforms && typeof outputText === 'string') {
         return parseMarkdownToPlatforms(outputText);
     }
 
     // Fallback to structured JSON format
     const posts: PostResult[] = [];
-    const platformPosts = response.output?.platform_posts || response.platform_posts || response;
+    const outputObj = responseObj.output as Record<string, unknown> | undefined;
+    const platformPosts = (outputObj?.platform_posts || responseObj.platform_posts || response) as Record<string, unknown>;
 
     if (platformPosts && typeof platformPosts === 'object') {
-        if (platformPosts.X) posts.push({ platform: 'Twitter', caption: platformPosts.X.text || platformPosts.X });
-        if (platformPosts.Instagram) posts.push({ platform: 'Instagram', caption: platformPosts.Instagram.text || platformPosts.Instagram });
-        if (platformPosts.LinkedIn) posts.push({ platform: 'LinkedIn', caption: platformPosts.LinkedIn.text || platformPosts.LinkedIn });
-        if (platformPosts.Facebook) posts.push({ platform: 'Facebook', caption: platformPosts.Facebook.text || platformPosts.Facebook });
-        if (platformPosts.Threads) posts.push({ platform: 'Threads', caption: platformPosts.Threads.text || platformPosts.Threads });
-        if (platformPosts.Pinterest) {
+        const pp = platformPosts as Record<string, { text?: string; title?: string; description?: string; link?: string; alt_text?: string } | string>;
+        if (pp.X) posts.push({ platform: 'Twitter', caption: typeof pp.X === 'string' ? pp.X : pp.X.text || '' });
+        if (pp.Instagram) posts.push({ platform: 'Instagram', caption: typeof pp.Instagram === 'string' ? pp.Instagram : pp.Instagram.text || '' });
+        if (pp.LinkedIn) posts.push({ platform: 'LinkedIn', caption: typeof pp.LinkedIn === 'string' ? pp.LinkedIn : pp.LinkedIn.text || '' });
+        if (pp.Facebook) posts.push({ platform: 'Facebook', caption: typeof pp.Facebook === 'string' ? pp.Facebook : pp.Facebook.text || '' });
+        if (pp.Threads) posts.push({ platform: 'Threads', caption: typeof pp.Threads === 'string' ? pp.Threads : pp.Threads.text || '' });
+        if (pp.Pinterest && typeof pp.Pinterest !== 'string') {
             posts.push({
                 platform: 'Pinterest',
-                title: platformPosts.Pinterest.title,
-                caption: platformPosts.Pinterest.description,
-                link: platformPosts.Pinterest.link,
-                altText: platformPosts.Pinterest.alt_text
+                title: pp.Pinterest.title,
+                caption: pp.Pinterest.description || '',
+                link: pp.Pinterest.link,
+                altText: pp.Pinterest.alt_text
             });
         }
     }
@@ -178,8 +257,23 @@ function parsePostResponse(response: any): PostResult[] {
     return posts;
 }
 
-function parseImageResponse(response: any): ImageResult {
-    const outputText = response.output || response;
+function parseImageResponse(response: unknown): ImageResult {
+    // Handle string response
+    if (typeof response === 'string') {
+        let imageUrl = '';
+        let imagePrompt = '';
+        const urlMatch = response.match(/!\[.*?\]\((https?:\/\/[^)]+)\)/);
+        const imgMatch = response.match(/image[_\s]?url[:\s]+([^\s\n]+)/i);
+        if (urlMatch) imageUrl = urlMatch[1];
+        else if (imgMatch) imageUrl = imgMatch[1];
+        const promptMatch = response.match(/prompt[:\s]+(.+?)(?:\n|$)/i);
+        if (promptMatch) imagePrompt = promptMatch[1].trim();
+        return { imageUrl, imagePrompt, posts: [] };
+    }
+
+    // Handle object response
+    const responseObj = response as Record<string, unknown>;
+    const outputText = responseObj.output || response;
 
     // Check if it's markdown with an image URL
     let imageUrl = '';
@@ -187,7 +281,7 @@ function parseImageResponse(response: any): ImageResult {
 
     if (typeof outputText === 'string') {
         // Try to find image URL in markdown
-        const urlMatch = outputText.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
+        const urlMatch = outputText.match(/!\[.*?\]\((https?:\/\/[^)]+)\)/);
         const imgMatch = outputText.match(/image[_\s]?url[:\s]+([^\s\n]+)/i);
         if (urlMatch) imageUrl = urlMatch[1];
         else if (imgMatch) imageUrl = imgMatch[1];
@@ -196,8 +290,9 @@ function parseImageResponse(response: any): ImageResult {
         const promptMatch = outputText.match(/prompt[:\s]+(.+?)(?:\n|$)/i);
         if (promptMatch) imagePrompt = promptMatch[1].trim();
     } else {
-        imageUrl = outputText?.image_url || outputText?.url || '';
-        imagePrompt = outputText?.unified_image_prompt || outputText?.prompt || '';
+        const outputObj = outputText as Record<string, string> | null;
+        imageUrl = outputObj?.image_url || outputObj?.url || '';
+        imagePrompt = outputObj?.unified_image_prompt || outputObj?.prompt || '';
     }
 
     return {
@@ -207,44 +302,7 @@ function parseImageResponse(response: any): ImageResult {
     };
 }
 
-function parseVideoResponse(response: any): VideoResult {
-    const outputText = response.output || response;
-
-    let videoUrl = '';
-    let videoPrompt = '';
-    let posts: Record<string, any> = {};
-
-    if (typeof outputText === 'string') {
-        // Try to find video URL in text
-        const urlMatch = outputText.match(/video[_\s]?url[:\s]+([^\s\n]+)/i);
-        const mp4Match = outputText.match(/(https?:\/\/[^\s]+\.mp4)/i);
-        if (urlMatch) videoUrl = urlMatch[1];
-        else if (mp4Match) videoUrl = mp4Match[1];
-
-        // Parse posts from markdown
-        const parsedPosts = parseMarkdownToPlatforms(outputText);
-        parsedPosts.forEach(p => {
-            posts[p.platform.toLowerCase()] = p.caption;
-        });
-    } else {
-        videoUrl = outputText?.video_url || outputText?.Video_URL || '';
-        videoPrompt = outputText?.video_prompt || outputText?.Video_Prompt || '';
-        posts = {
-            twitter: outputText?.twitter || outputText?.['Twitter Post'] || '',
-            instagram: outputText?.instagram || outputText?.['Instagram Caption'] || '',
-            linkedin: outputText?.linkedin || outputText?.['LinkedIn Post'] || '',
-            facebook: outputText?.facebook || outputText?.['Facebook Post'] || '',
-            threads: outputText?.threads || outputText?.['Threads Text Post'] || '',
-            tiktok: outputText?.tiktok || outputText?.['TikTok Caption'] || '',
-        };
-    }
-
-    return {
-        videoUrl,
-        videoPrompt,
-        posts
-    };
-}
+// NOTE: Video parsing is no longer needed - videos are generated directly via Fal.ai
 
 // Helper to strip HTML and preserve line breaks
 function stripHtml(html: string): string {
@@ -332,7 +390,7 @@ KEY SCENES:
 EMOTIONAL ARC: From vulnerability → realization → strength`;
 }
 
-function formatButterflyTheme(chapter: Chapter, _text: string): string {
+function formatButterflyTheme(chapter: Chapter): string {
     const stage = chapter.butterflyStage || 'chrysalis';
 
     // Map App types to Guide descriptions
@@ -346,7 +404,7 @@ function formatButterflyTheme(chapter: Chapter, _text: string): string {
 VISUAL METAPHOR: ${description}`;
 }
 
-function formatWisdomLessons(_text: string): string {
+function formatWisdomLessons(): string {
     return `CORE LESSON: [Extract the main lesson here]
 
 SUPPORTING INSIGHTS:
@@ -358,7 +416,7 @@ APPLICABLE TO: Anyone going through a major life transition.
 WISDOM HOOK: "The Struggle / Was The Path"`;
 }
 
-function formatAuthorVoice(user: any): string {
+function formatAuthorVoice(user: { displayName?: string | null } | null): string {
     return `AUTHOR NAME: ${user?.displayName || 'The Author'}
 
 VOICE CHARACTERISTICS:
@@ -477,9 +535,10 @@ const SocialMediaRepurpose = () => {
             if (saved) {
                 const parsed = JSON.parse(saved);
                 // Restore Date objects from ISO strings
-                return parsed.map((h: any) => ({
+                return parsed.map((h: { timestamp: string; lastRetryTime?: string }) => ({
                     ...h,
-                    timestamp: new Date(h.timestamp)
+                    timestamp: new Date(h.timestamp),
+                    lastRetryTime: h.lastRetryTime ? new Date(h.lastRetryTime) : undefined
                 }));
             }
             return [];
@@ -492,6 +551,14 @@ const SocialMediaRepurpose = () => {
     // Video save state
     const [isSavingVideo, setIsSavingVideo] = useState(false);
     const [videoSavedId, setVideoSavedId] = useState<string | null>(null);
+
+    // Post save state
+    const [savingPostId, setSavingPostId] = useState<string | null>(null);
+    const [savedPostIds, setSavedPostIds] = useState<Set<string>>(new Set());
+
+    // Image save state
+    const [isSavingImage, setIsSavingImage] = useState(false);
+    const [imageSavedId, setImageSavedId] = useState<string | null>(null);
 
     // Persist results to localStorage when they change
     useEffect(() => {
@@ -598,8 +665,8 @@ const SocialMediaRepurpose = () => {
             // New Context System
             setContextFields({
                 chapter_context: formatChapterContext(selectedChapter, selectedText),
-                butterfly_theme: formatButterflyTheme(selectedChapter, selectedText),
-                wisdom_lessons: formatWisdomLessons(selectedText),
+                butterfly_theme: formatButterflyTheme(selectedChapter),
+                wisdom_lessons: formatWisdomLessons(),
                 author_voice: formatAuthorVoice(currentUser)
             });
         }
@@ -623,7 +690,7 @@ const SocialMediaRepurpose = () => {
         }));
 
         // Build payload with BOTH legacy and new context
-        const payload: Record<string, any> = {
+        const payload: WebhookPayload = {
             // Legacy Routing
             type: type,
             // For videos, send the scene description as primary content; for others, send the selected text
@@ -654,28 +721,55 @@ const SocialMediaRepurpose = () => {
         }
 
         try {
+            // VIDEO: Use Fal.ai with Veo 3 directly (bypasses n8n entirely)
+            if (type === 'Video') {
+                console.log('Generating video with Fal.ai Veo 3...');
+                console.log('Video prompt:', generatedVideoScene);
+
+                // Use 9:16 for social media (TikTok/Reels/Shorts format)
+                const result = await generateVideoWithFal(generatedVideoScene, 8, '9:16');
+
+                if (result.status === 'completed' && result.videoUrl) {
+                    console.log('Video generated successfully:', result.videoUrl);
+                    setVideoResults({
+                        videoUrl: result.videoUrl,
+                        videoPrompt: generatedVideoScene,
+                        posts: {}
+                    });
+                    setActiveResultTab('videos');
+                    setShowResults(true);
+
+                    // Add to history
+                    setHistory(prev => [{
+                        id: Date.now().toString(),
+                        timestamp: new Date(),
+                        chapterTitle: selectedChapter?.title || 'Unknown',
+                        type: 'Video',
+                        status: 'complete',
+                        payload: payload
+                    }, ...prev.slice(0, 9)]);
+                } else {
+                    throw new Error(result.error || 'Video generation failed');
+                }
+                return; // Exit early for videos
+            }
+
+            // POSTS & IMAGES: Use n8n webhook
             const controller = new AbortController();
-            // Videos take MUCH longer to generate - use 10 MINUTE timeout
-            // n8n video generation can take 3-8 minutes depending on the AI model
-            const timeoutMs = type === 'Video' ? 600000 : 120000; // 10 mins for video, 2 mins for others
+            const timeoutMs = 120000; // 2 mins for posts/images
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             console.log(`Sending ${type} request to n8n:`, payload);
             console.log(`Timeout set to ${timeoutMs / 1000} seconds`);
 
-            // Call n8n directly - make sure n8n Respond to Webhook has CORS headers configured
-            // For long-running video requests, n8n must keep the connection open
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    // Some browsers may need these for long requests
-                    'Accept': '*/*'
+                    'Accept': 'application/json'
                 },
                 body: JSON.stringify(payload),
-                signal: controller.signal,
-                // Ensure the request is not cached
-                cache: 'no-store'
+                signal: controller.signal
             });
 
             clearTimeout(timeoutId);
@@ -688,7 +782,7 @@ const SocialMediaRepurpose = () => {
             const contentType = response.headers.get('content-type') || '';
             console.log(`Response content-type: ${contentType}`);
 
-            let data: any;
+            let data: unknown;
 
             // Helper function to convert blob to base64 data URL (persists across navigation)
             const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -700,17 +794,12 @@ const SocialMediaRepurpose = () => {
                 });
             };
 
-            // Handle binary responses (images/videos)
-            if (contentType.includes('image/') || contentType.includes('video/') || contentType.includes('application/octet-stream')) {
+            // Handle binary responses (images)
+            if (contentType.includes('image/') || contentType.includes('application/octet-stream')) {
                 console.log('Received binary response, converting to base64...');
                 const blob = await response.blob();
                 const base64Url = await blobToBase64(blob);
-
-                if (type === 'Image' || contentType.includes('image/')) {
-                    data = { imageUrl: base64Url, binaryType: 'image' };
-                } else {
-                    data = { videoUrl: base64Url, binaryType: 'video' };
-                }
+                data = { imageUrl: base64Url, binaryType: 'image' };
             } else {
                 // Try to parse as JSON first
                 const text = await response.text();
@@ -727,7 +816,6 @@ const SocialMediaRepurpose = () => {
                         data = JSON.parse(text);
                     } catch (parseError) {
                         console.error('JSON parse error:', parseError);
-                        // If JSON parsing fails, treat the text as raw content
                         data = { output: text };
                     }
                 }
@@ -738,14 +826,17 @@ const SocialMediaRepurpose = () => {
             // Parse response based on type
             if (type === 'Post') {
                 const parsed = parsePostResponse(data);
+                console.log('Parsed post results:', parsed);
+                console.log('Post count:', parsed.length);
                 setPostResults(parsed);
                 setActiveResultTab('posts');
             } else if (type === 'Image') {
                 // Handle binary image response
-                if (data.binaryType === 'image' || data.imageUrl) {
+                const imageData = data as { binaryType?: string; imageUrl?: string; prompt?: string };
+                if (imageData.binaryType === 'image' || imageData.imageUrl) {
                     setImageResults({
-                        imageUrl: data.imageUrl || '',
-                        imagePrompt: data.prompt || '',
+                        imageUrl: imageData.imageUrl || '',
+                        imagePrompt: imageData.prompt || '',
                         posts: []
                     });
                 } else {
@@ -754,19 +845,6 @@ const SocialMediaRepurpose = () => {
                     setPostResults(parsed.posts);
                 }
                 setActiveResultTab('images');
-            } else if (type === 'Video') {
-                // Handle binary video response
-                if (data.binaryType === 'video' || data.videoUrl) {
-                    setVideoResults({
-                        videoUrl: data.videoUrl || '',
-                        videoPrompt: data.prompt || '',
-                        posts: {}
-                    });
-                } else {
-                    const parsed = parseVideoResponse(data);
-                    setVideoResults(parsed);
-                }
-                setActiveResultTab('videos');
             }
 
             setShowResults(true);
@@ -781,20 +859,21 @@ const SocialMediaRepurpose = () => {
                 payload: payload
             }, ...prev.slice(0, 9)]); // Keep last 10
 
-        } catch (error: any) {
+        } catch (error: unknown) {
+            const err = error as Error;
             console.error(`${type} generation error:`, error);
 
             let errorMessage: string;
             let historyStatus: 'error' | 'pending' = 'error';
 
-            if (error.name === 'AbortError') {
+            if (err.name === 'AbortError') {
                 if (type === 'Video') {
                     errorMessage = 'Video generation timed out after 10 minutes. Your video may still be processing in n8n. Use the Retry button to check.';
                     historyStatus = 'pending'; // Mark as pending, not error
                 } else {
                     errorMessage = 'Request timed out. The generation may still be processing.';
                 }
-            } else if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+            } else if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
                 // Connection was dropped during long request
                 if (type === 'Video') {
                     errorMessage = 'Connection dropped during video generation. Your video may still be processing. Try the Retry button in a few minutes.';
@@ -803,7 +882,7 @@ const SocialMediaRepurpose = () => {
                     errorMessage = 'Network error. Please try again.';
                 }
             } else {
-                errorMessage = error.message || 'Unknown error occurred';
+                errorMessage = err.message || 'Unknown error occurred';
             }
 
             setErrors(prev => ({
@@ -838,7 +917,86 @@ const SocialMediaRepurpose = () => {
         setTimeout(() => setCopiedId(null), 2000);
     };
 
-    // Save video to Firebase library
+    // Save individual post to library
+    const handleSavePost = async (post: { platform: string; caption: string; title?: string }, idx: number) => {
+        if (!currentUser) {
+            console.error('No user to save post');
+            return;
+        }
+
+        const postId = `post-${idx}`;
+        setSavingPostId(postId);
+
+        try {
+            await savePostToLibrary(
+                currentUser.uid,
+                selectedChapterId || null,
+                selectedChapter?.title || 'Unknown Chapter',
+                post.platform,
+                post.caption,
+                post.title,
+                'social-media',
+                generatedTopic, // topic
+                `Social media post for ${post.platform}`, // summary
+                selectedText.substring(0, 500) // sourceText
+            );
+
+            setSavedPostIds(prev => new Set([...prev, postId]));
+            console.log('Post saved to library:', post.platform);
+        } catch (error) {
+            console.error('Failed to save post:', error);
+            alert('Failed to save post to library.');
+        } finally {
+            setSavingPostId(null);
+        }
+    };
+
+    // Save all posts at once
+    const handleSaveAllPosts = async () => {
+        if (!currentUser || postResults.length === 0) return;
+
+        for (let i = 0; i < postResults.length; i++) {
+            await handleSavePost(postResults[i], i);
+        }
+    };
+
+    // Save image to library
+    const handleSaveImage = async () => {
+        if (!imageResults?.imageUrl || !currentUser) {
+            console.error('No image URL or user to save');
+            return;
+        }
+
+        setIsSavingImage(true);
+
+        try {
+            const docRef = await saveImageToSocialLibrary(
+                currentUser.uid,
+                selectedChapterId || null,
+                selectedChapter?.title || 'Unknown Chapter',
+                imageResults.imageUrl,
+                imageResults.imagePrompt || generatedTopic,
+                {
+                    summary: `Social media image for ${selectedChapter?.title || 'chapter'}`,
+                    aspectRatio: '16:9',
+                    platforms: PLATFORMS.map(p => p.id),
+                    sourceText: selectedText.substring(0, 500),
+                    source: 'social-media'
+                }
+            );
+
+            setImageSavedId(docRef.id);
+            setTimeout(() => setImageSavedId(null), 3000);
+            console.log('Image saved to library:', docRef.id);
+        } catch (error) {
+            console.error('Failed to save image:', error);
+            alert('Failed to save image to library.');
+        } finally {
+            setIsSavingImage(false);
+        }
+    };
+
+    // Save video to Firebase library (both visuals and social media library)
     const handleSaveVideoToLibrary = async () => {
         if (!videoResults?.videoUrl || !currentUser) {
             console.error('No video URL or user to save');
@@ -848,21 +1006,39 @@ const SocialMediaRepurpose = () => {
         setIsSavingVideo(true);
 
         try {
+            // Save to visuals library (for storage upload)
             const { id, url } = await saveGeneratedVideo(
                 currentUser.uid,
                 selectedChapterId || null,
                 videoResults.videoUrl,
-                'social-media',
+                videoResults.videoPrompt || 'Social media video',
+                selectedChapter?.title
+                    ? `${selectedChapter.title} - Social Media Video`
+                    : 'Generated Video',
+                'social-media'
+            );
+
+            console.log('Video saved to visuals library:', id, url);
+
+            // Also save to social media library with full metadata
+            await saveVideoToSocialLibrary(
+                currentUser.uid,
+                selectedChapterId || null,
+                selectedChapter?.title || 'Unknown Chapter',
+                url, // Use the permanent Firebase URL
+                videoResults.videoPrompt || generatedVideoScene,
                 {
-                    title: selectedChapter?.title
-                        ? `${selectedChapter.title} - Social Media Video`
-                        : 'Generated Video',
-                    prompt: videoResults.videoPrompt,
-                    platforms: videoResults.posts as Record<string, string>
+                    summary: `Social media video for ${selectedChapter?.title || 'chapter'}`,
+                    duration: 8,
+                    aspectRatio: '9:16',
+                    platforms: ['tiktok', 'instagram', 'youtube'],
+                    sourceText: selectedText.substring(0, 500),
+                    generationModel: 'veo3-fast',
+                    source: 'social-media'
                 }
             );
 
-            console.log('Video saved to library:', id, url);
+            console.log('Video also saved to social media library');
 
             // Update the video URL to the permanent Firebase URL if it changed
             if (url !== videoResults.videoUrl) {
@@ -914,15 +1090,52 @@ const SocialMediaRepurpose = () => {
         }));
 
         try {
+            // VIDEO: Use Fal.ai with Veo 3 directly (bypasses n8n entirely)
+            if (type === 'Video') {
+                console.log('Retrying video with Fal.ai Veo 3...');
+                const videoPrompt = historyItem.payload.video_scene || historyItem.payload.content || '';
+
+                const result = await generateVideoWithFal(videoPrompt, 8, '9:16');
+
+                if (result.status === 'completed' && result.videoUrl) {
+                    console.log('Video retry successful:', result.videoUrl);
+                    setVideoResults({
+                        videoUrl: result.videoUrl,
+                        videoPrompt: videoPrompt,
+                        posts: {}
+                    });
+                    setActiveResultTab('videos');
+                    setShowResults(true);
+
+                    setHistory(prev => prev.map(h =>
+                        h.id === historyItem.id
+                            ? { ...h, status: 'complete' as const, errorMessage: undefined }
+                            : h
+                    ));
+                } else {
+                    throw new Error(result.error || 'Video generation failed');
+                }
+
+                setIsLoading(prev => ({
+                    ...prev,
+                    videos: false
+                }));
+                return;
+            }
+
+            // POSTS & IMAGES: Use n8n
             const controller = new AbortController();
-            const timeoutMs = type === 'Video' ? 300000 : 120000;
+            const timeoutMs = 120000; // 2 mins for posts/images
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             console.log(`Retrying ${type} request:`, historyItem.payload);
 
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
                 body: JSON.stringify(historyItem.payload),
                 signal: controller.signal
             });
@@ -935,7 +1148,7 @@ const SocialMediaRepurpose = () => {
 
             // Handle response (same logic as sendToN8N)
             const contentType = response.headers.get('content-type') || '';
-            let data: any;
+            let data: unknown;
 
             const blobToBase64 = (blob: Blob): Promise<string> => {
                 return new Promise((resolve, reject) => {
@@ -946,14 +1159,10 @@ const SocialMediaRepurpose = () => {
                 });
             };
 
-            if (contentType.includes('image/') || contentType.includes('video/') || contentType.includes('application/octet-stream')) {
+            if (contentType.includes('image/') || contentType.includes('application/octet-stream')) {
                 const blob = await response.blob();
                 const base64Url = await blobToBase64(blob);
-                if (type === 'Image' || contentType.includes('image/')) {
-                    data = { imageUrl: base64Url, binaryType: 'image' };
-                } else {
-                    data = { videoUrl: base64Url, binaryType: 'video' };
-                }
+                data = { imageUrl: base64Url, binaryType: 'image' };
             } else {
                 const text = await response.text();
                 try {
@@ -968,20 +1177,14 @@ const SocialMediaRepurpose = () => {
                 setPostResults(parsePostResponse(data));
                 setActiveResultTab('posts');
             } else if (type === 'Image') {
-                if (data.binaryType === 'image' || data.imageUrl) {
-                    setImageResults({ imageUrl: data.imageUrl || '', imagePrompt: '', posts: [] });
+                const imageData = data as { binaryType?: string; imageUrl?: string };
+                if (imageData.binaryType === 'image' || imageData.imageUrl) {
+                    setImageResults({ imageUrl: imageData.imageUrl || '', imagePrompt: '', posts: [] });
                 } else {
                     const parsed = parseImageResponse(data);
                     setImageResults(parsed);
                 }
                 setActiveResultTab('images');
-            } else if (type === 'Video') {
-                if (data.binaryType === 'video' || data.videoUrl) {
-                    setVideoResults({ videoUrl: data.videoUrl || '', videoPrompt: '', posts: {} });
-                } else {
-                    setVideoResults(parseVideoResponse(data));
-                }
-                setActiveResultTab('videos');
             }
 
             setShowResults(true);
@@ -993,10 +1196,11 @@ const SocialMediaRepurpose = () => {
                     : h
             ));
 
-        } catch (error: any) {
-            const errorMessage = error.name === 'AbortError'
+        } catch (error: unknown) {
+            const err = error as Error;
+            const errorMessage = err.name === 'AbortError'
                 ? `Still processing... (attempt ${(historyItem.retryCount || 0) + 1})`
-                : error.message;
+                : err.message;
 
             // Update history item with error
             setHistory(prev => prev.map(h =>
@@ -1301,7 +1505,7 @@ const SocialMediaRepurpose = () => {
                                 ].map(tab => (
                                     <button
                                         key={tab.id}
-                                        onClick={() => setContextTab(tab.id as any)}
+                                        onClick={() => setContextTab(tab.id as 'chapter' | 'theme' | 'wisdom' | 'voice')}
                                         style={{
                                             flex: 1,
                                             padding: '0.5rem',
@@ -1524,7 +1728,7 @@ const SocialMediaRepurpose = () => {
                                     {['posts', 'images', 'videos'].map(tab => (
                                         <button
                                             key={tab}
-                                            onClick={() => setActiveResultTab(tab as any)}
+                                            onClick={() => setActiveResultTab(tab as 'posts' | 'images' | 'videos')}
                                             className="btn"
                                             style={{
                                                 padding: '0.4rem 0.75rem',
@@ -1550,91 +1754,131 @@ const SocialMediaRepurpose = () => {
 
                             {/* Posts Results */}
                             {activeResultTab === 'posts' && postResults.length > 0 && (
-                                <div style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: 'repeat(2, 1fr)',
-                                    gap: '0.75rem',
-                                    maxHeight: '400px',
-                                    overflowY: 'auto'
-                                }}>
-                                    {postResults.map((post, idx) => {
-                                        const Icon = getPlatformIcon(post.platform);
-                                        const color = getPlatformColor(post.platform);
-                                        const postId = `post-${idx}`;
+                                <div>
+                                    <div style={{
+                                        display: 'flex',
+                                        justifyContent: 'flex-end',
+                                        marginBottom: '0.75rem'
+                                    }}>
+                                        <button
+                                            onClick={handleSaveAllPosts}
+                                            className="btn btn-primary"
+                                            style={{
+                                                padding: '0.4rem 0.75rem',
+                                                fontSize: '0.75rem',
+                                                gap: '0.3rem'
+                                            }}
+                                        >
+                                            <Save size={12} />
+                                            Save All Posts to Library
+                                        </button>
+                                    </div>
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(2, 1fr)',
+                                        gap: '0.75rem',
+                                        maxHeight: '400px',
+                                        overflowY: 'auto'
+                                    }}>
+                                        {postResults.map((post, idx) => {
+                                            const Icon = getPlatformIcon(post.platform);
+                                            const color = getPlatformColor(post.platform);
+                                            const postId = `post-${idx}`;
 
-                                        return (
-                                            <div
-                                                key={idx}
-                                                style={{
-                                                    background: 'white',
-                                                    border: '1px solid #e5e7eb',
-                                                    borderRadius: '0.75rem',
-                                                    overflow: 'hidden'
-                                                }}
-                                            >
-                                                <div style={{
-                                                    background: color,
-                                                    color: 'white',
-                                                    padding: '0.5rem 0.75rem',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '0.5rem',
-                                                    fontSize: '0.8rem',
-                                                    fontWeight: 600
-                                                }}>
-                                                    <Icon size={14} />
-                                                    {post.platform}
-                                                </div>
-                                                <div style={{ padding: '0.75rem' }}>
-                                                    {post.title && (
-                                                        <div style={{
-                                                            fontWeight: 600,
-                                                            fontSize: '0.85rem',
-                                                            marginBottom: '0.5rem'
-                                                        }}>
-                                                            {post.title}
-                                                        </div>
-                                                    )}
+                                            return (
+                                                <div
+                                                    key={idx}
+                                                    style={{
+                                                        background: 'white',
+                                                        border: '1px solid #e5e7eb',
+                                                        borderRadius: '0.75rem',
+                                                        overflow: 'hidden'
+                                                    }}
+                                                >
                                                     <div style={{
-                                                        fontSize: '0.8rem',
-                                                        color: '#444',
-                                                        lineHeight: 1.6,
-                                                        maxHeight: '200px',
-                                                        overflowY: 'auto',
-                                                        whiteSpace: 'pre-wrap'
-                                                    }}>
-                                                        {post.caption}
-                                                    </div>
-                                                    <div style={{
+                                                        background: color,
+                                                        color: 'white',
+                                                        padding: '0.5rem 0.75rem',
                                                         display: 'flex',
-                                                        justifyContent: 'space-between',
                                                         alignItems: 'center',
-                                                        marginTop: '0.75rem',
-                                                        paddingTop: '0.5rem',
-                                                        borderTop: '1px solid #f3f4f6'
+                                                        gap: '0.5rem',
+                                                        fontSize: '0.8rem',
+                                                        fontWeight: 600
                                                     }}>
-                                                        <span style={{ fontSize: '0.7rem', color: '#999' }}>
-                                                            {post.caption?.length || 0} chars
-                                                        </span>
-                                                        <button
-                                                            onClick={() => copyToClipboard(post.caption, postId)}
-                                                            className="btn"
-                                                            style={{
-                                                                padding: '0.25rem 0.5rem',
-                                                                fontSize: '0.7rem',
-                                                                gap: '0.3rem',
-                                                                background: copiedId === postId ? '#10b981' : undefined,
-                                                                color: copiedId === postId ? 'white' : undefined
-                                                            }}
-                                                        >
-                                                            {copiedId === postId ? <Check size={12} /> : <Copy size={12} />}
-                                                            {copiedId === postId ? 'Copied!' : 'Copy'}
-                                                        </button>
+                                                        <Icon size={14} />
+                                                        {post.platform}
+                                                    </div>
+                                                    <div style={{ padding: '0.75rem' }}>
+                                                        {post.title && (
+                                                            <div style={{
+                                                                fontWeight: 600,
+                                                                fontSize: '0.85rem',
+                                                                marginBottom: '0.5rem'
+                                                            }}>
+                                                                {post.title}
+                                                            </div>
+                                                        )}
+                                                        <div style={{
+                                                            fontSize: '0.8rem',
+                                                            color: '#444',
+                                                            lineHeight: 1.6,
+                                                            maxHeight: '200px',
+                                                            overflowY: 'auto',
+                                                            whiteSpace: 'pre-wrap'
+                                                        }}>
+                                                            {post.caption}
+                                                        </div>
+                                                        <div style={{
+                                                            display: 'flex',
+                                                            justifyContent: 'space-between',
+                                                            alignItems: 'center',
+                                                            marginTop: '0.75rem',
+                                                            paddingTop: '0.5rem',
+                                                            borderTop: '1px solid #f3f4f6'
+                                                        }}>
+                                                            <span style={{ fontSize: '0.7rem', color: '#999' }}>
+                                                                {post.caption?.length || 0} chars
+                                                            </span>
+                                                            <button
+                                                                onClick={() => copyToClipboard(post.caption, postId)}
+                                                                className="btn"
+                                                                style={{
+                                                                    padding: '0.25rem 0.5rem',
+                                                                    fontSize: '0.7rem',
+                                                                    gap: '0.3rem',
+                                                                    background: copiedId === postId ? '#10b981' : undefined,
+                                                                    color: copiedId === postId ? 'white' : undefined
+                                                                }}
+                                                            >
+                                                                {copiedId === postId ? <Check size={12} /> : <Copy size={12} />}
+                                                                {copiedId === postId ? 'Copied!' : 'Copy'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleSavePost(post, idx)}
+                                                                disabled={savingPostId === postId || savedPostIds.has(postId)}
+                                                                className="btn"
+                                                                style={{
+                                                                    padding: '0.25rem 0.5rem',
+                                                                    fontSize: '0.7rem',
+                                                                    gap: '0.3rem',
+                                                                    background: savedPostIds.has(postId) ? '#10b981' : savingPostId === postId ? '#9ca3af' : '#8b5cf6',
+                                                                    color: 'white'
+                                                                }}
+                                                            >
+                                                                {savingPostId === postId ? (
+                                                                    <><Loader2 size={12} className="animate-spin" /> Saving...</>
+                                                                ) : savedPostIds.has(postId) ? (
+                                                                    <><Check size={12} /> Saved</>
+                                                                ) : (
+                                                                    <><Save size={12} /> Save</>
+                                                                )}
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        );
-                                    })}
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             )}
 
@@ -1671,6 +1915,39 @@ const SocialMediaRepurpose = () => {
                                                 >
                                                     <Download size={14} /> Download Image
                                                 </a>
+                                                <button
+                                                    onClick={handleSaveImage}
+                                                    disabled={isSavingImage || !!imageSavedId}
+                                                    className="btn btn-primary"
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '0.5rem',
+                                                        fontSize: '0.8rem',
+                                                        gap: '0.4rem',
+                                                        background: imageSavedId
+                                                            ? '#10b981'
+                                                            : isSavingImage
+                                                                ? '#9ca3af'
+                                                                : undefined
+                                                    }}
+                                                >
+                                                    {isSavingImage ? (
+                                                        <>
+                                                            <Loader2 size={14} className="animate-spin" />
+                                                            Saving...
+                                                        </>
+                                                    ) : imageSavedId ? (
+                                                        <>
+                                                            <Check size={14} />
+                                                            Saved!
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Save size={14} />
+                                                            Save to Library
+                                                        </>
+                                                    )}
+                                                </button>
                                             </div>
                                         </div>
                                     )}

@@ -449,3 +449,58 @@ export const generateTikTokScript = async (chapterTitle: string, content: string
         };
     }
 };
+
+/**
+ * Generate wisdom insights from chapter content for social media strategy
+ */
+export const generateWisdomInsights = async (chapterContent: string, chapterTitle: string): Promise<{
+    coreLesson: string;
+    supportingInsights: string[];
+    applicableTo: string;
+    wisdomHook: string;
+}> => {
+    if (!genAI) {
+        return {
+            coreLesson: "Finding strength in vulnerability during life's most challenging moments.",
+            supportingInsights: [
+                "The struggle itself contains the seeds of growth.",
+                "What feels like an ending is often a disguised beginning."
+            ],
+            applicableTo: "Anyone navigating major life transitions or seeking meaning in difficult experiences.",
+            wisdomHook: "The Cocoon Knew / Before The Flight"
+        };
+    }
+
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const prompt = `
+    Analyze this memoir chapter titled "${chapterTitle}" and extract the core wisdom and life lessons.
+    
+    CHAPTER CONTENT:
+    ${chapterContent.substring(0, 3000)}
+    
+    Return as a JSON object:
+    {
+      "coreLesson": "A single, powerful sentence capturing the main life lesson from this chapter",
+      "supportingInsights": ["2-3 additional insights or truths revealed in the text"],
+      "applicableTo": "Who would benefit from this wisdom (be specific about life situations)",
+      "wisdomHook": "A short, punchy phrase that could be used as a social media hook (format: 'Part One / Part Two')"
+    }
+  `;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    try {
+        const text = response.text();
+        const jsonString = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+        return JSON.parse(jsonString);
+    } catch (e) {
+        console.error('Error generating wisdom insights:', e);
+        return {
+            coreLesson: "Transformation requires us to embrace the unknown.",
+            supportingInsights: ["Growth often comes from our most difficult moments."],
+            applicableTo: "Anyone seeking meaning in their personal journey.",
+            wisdomHook: "The Struggle / Was The Path"
+        };
+    }
+};
+

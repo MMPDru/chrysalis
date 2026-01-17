@@ -1,47 +1,28 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-    Palette,
-    PlayCircle,
-    Image as ImageIcon,
-    Sparkles,
-    Loader2,
-    Download,
-    Trash2,
-    Check,
-    Archive,
-    ArchiveRestore,
-    Bookmark,
-    LayoutGrid,
-    List,
-    X,
-    Move
+    Palette, PlayCircle, Image as ImageIcon, Sparkles, Loader2, Download,
+    Trash2, Check, Archive, ArchiveRestore, Bookmark, LayoutGrid, List, X, Move,
+    RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { subscribeToChapters } from '../lib/chapters';
+import { useVisualGeneration } from '../contexts/VisualGenerationContext';
+import { subscribeToChapters, fetchLatestVersion } from '../lib/chapters';
 import type { Chapter } from '../lib/types';
 import { generateVisualPrompts } from '../lib/gemini';
+import { generateImageWithFal } from '../lib/fal';
 import {
-    updateChapterImages,
-    subscribeToVisualAssets,
-    saveImageToLibrary,
-    saveVideoToLibrary,
-    deleteImage,
-    deleteVideo,
-    archiveImage,
-    unarchiveImage,
-    archiveVideo,
-    unarchiveVideo,
-    moveImageToChapter,
-    setImageType,
-    setAsChapterThumbnail,
-    setAsChapterHeader,
-    type VisualAsset
+    updateChapterImages, subscribeToVisualAssets, saveImageToLibrary, saveVideoToLibrary,
+    deleteImage, deleteVideo, archiveImage, unarchiveImage, archiveVideo, unarchiveVideo,
+    moveImageToChapter, setAsChapterThumbnail, setAsChapterHeader, type VisualAsset,
+    downloadFile, subscribeToTrashAssets, restoreVisualAsset, permanentlyDeleteVisualAsset,
+    // uploadVisualAsset
 } from '../lib/visuals';
 import TitleGenerator from '../components/studio/TitleGenerator';
 
 const VisualStudioHome = () => {
     const { currentUser } = useAuth();
+    const { startVideoGeneration, isGeneratingForChapter, jobs: generationJobs, dismissJob } = useVisualGeneration();
     const [searchParams, setSearchParams] = useSearchParams();
 
     // Get initial values from URL or localStorage
@@ -53,17 +34,18 @@ const VisualStudioHome = () => {
 
     const getInitialView = () => {
         const urlView = searchParams.get('view');
-        if (urlView === 'visuals' || urlView === 'videos' || urlView === 'gallery') return urlView;
+        if (urlView === 'visuals' || urlView === 'videos' || urlView === 'gallery' || urlView === 'trash') return urlView;
         return 'visuals';
     };
 
     const [chapters, setChapters] = useState<Chapter[]>([]);
     const [selectedChapterId, setSelectedChapterId] = useState<string>(getInitialChapterId());
     const [activeChapter, setActiveChapter] = useState<Chapter | null>(null);
-    const [view, setView] = useState<'visuals' | 'videos' | 'gallery'>(getInitialView());
+    const [view, setView] = useState<'visuals' | 'videos' | 'gallery' | 'trash'>(getInitialView());
 
     // Visual Assets State
     const [visualAssets, setVisualAssets] = useState<VisualAsset[]>([]);
+    const [trashAssets, setTrashAssets] = useState<VisualAsset[]>([]);
     const [galleryFilter, setGalleryFilter] = useState<string>('all');
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [showArchived, setShowArchived] = useState(false);
@@ -77,13 +59,15 @@ const VisualStudioHome = () => {
     const [selectedImages, setSelectedImages] = useState<{ thumbnail: string, header: string }>({ thumbnail: '', header: '' });
 
     // Video States
-    const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-    const [generatedVideos, setGeneratedVideos] = useState<any[]>([]);
+    // isGeneratingVideo is now handled by context
+
 
     // Modal States
     const [confirmModal, setConfirmModal] = useState<{ show: boolean, action: string, item: any }>({ show: false, action: '', item: null });
     const [moveModal, setMoveModal] = useState<{ show: boolean, item: any }>({ show: false, item: null });
     const [videoDetailModal, setVideoDetailModal] = useState<{ show: boolean, video: any }>({ show: false, video: null });
+    // const [uploadModal, setUploadModal] = useState<{ show: boolean, file: File | null, chapterId: string }>({ show: false, file: null, chapterId: '' });
+    // const [isUploading, setIsUploading] = useState(false);
 
     // Subscribe to chapters
     useEffect(() => {
@@ -95,6 +79,12 @@ const VisualStudioHome = () => {
     useEffect(() => {
         if (!currentUser) return;
         return subscribeToVisualAssets(currentUser.uid, setVisualAssets);
+    }, [currentUser]);
+
+    // Subscribe to TRASH assets
+    useEffect(() => {
+        if (!currentUser) return;
+        return subscribeToTrashAssets(currentUser.uid, setTrashAssets);
     }, [currentUser]);
 
     // Update active chapter when selection changes
@@ -110,7 +100,6 @@ const VisualStudioHome = () => {
     // Combine visual assets from collection AND videos from chapters
     const allAssets: VisualAsset[] = [
         ...visualAssets,
-        // Also include conceptVideos from chapters
         ...chapters.flatMap(chapter =>
             (chapter.conceptVideos || []).map((video: any, idx: number) => ({
                 id: `${chapter.id}-video-${idx}`,
@@ -124,7 +113,6 @@ const VisualStudioHome = () => {
                 userId: chapter.userId
             }))
         ),
-        // Also include chapter images (thumbnailUrl, fullImageUrl)
         ...chapters.filter(c => c.thumbnailUrl || c.fullImageUrl).flatMap(chapter => {
             const assets: VisualAsset[] = [];
             if (chapter.thumbnailUrl) {
@@ -168,9 +156,20 @@ const VisualStudioHome = () => {
     });
 
     // Filter visual assets
+    // Filter visual assets
     const filteredAssets = dedupedAssets.filter(asset => {
         if (!showArchived && asset.archived) return false;
-        if (galleryFilter !== 'all' && asset.chapterId !== galleryFilter) return false;
+
+        // Determine if asset is orphaned (chapterId exists but chapter doesn't)
+        const assetChapterExists = asset.chapterId ? chapters.some(c => c.id === asset.chapterId) : false;
+
+        if (galleryFilter === 'unassigned') {
+            // Show both truly unassigned AND orphaned assets
+            if (asset.chapterId && assetChapterExists) return false;
+        } else if (galleryFilter !== 'all' && asset.chapterId !== galleryFilter) {
+            return false;
+        }
+
         if (typeFilter !== 'all') {
             if (typeFilter === 'images' && asset.type !== 'image') return false;
             if (typeFilter === 'videos' && asset.type !== 'video') return false;
@@ -185,12 +184,15 @@ const VisualStudioHome = () => {
         return dedupedAssets.filter(a => a.chapterId === chapterId && !a.archived).length;
     };
 
-    // Analyze chapter for prompts
     const handleAnalyze = async () => {
         if (!activeChapter) return;
         setIsAnalyzing(true);
         try {
-            const result = await generateVisualPrompts(activeChapter.title, "Sample content for analysis.", 'image');
+            // Fetch real chapter content for better prompts
+            const version = await fetchLatestVersion(activeChapter.id);
+            const content = version?.content || "No content available.";
+
+            const result = await generateVisualPrompts(activeChapter.title, content.substring(0, 5000), 'image');
             setPrompts(result);
         } catch (error) {
             console.error('Analysis error:', error);
@@ -199,29 +201,46 @@ const VisualStudioHome = () => {
         }
     };
 
-    // Generate images (simulated for now)
+    // Generate images using Fal.ai
     const handleGenerateImages = async () => {
+        if (!prompts?.fullImagePrompt) return;
+
         setIsGenerating(true);
-        setTimeout(() => {
-            setGeneratedOptions([
-                {
-                    id: '1',
-                    thumb: 'https://images.unsplash.com/photo-1518173946687-a4c8892bbd9f?w=400',
-                    full: 'https://images.unsplash.com/photo-1518173946687-a4c8892bbd9f?w=1200'
-                },
-                {
-                    id: '2',
-                    thumb: 'https://images.unsplash.com/photo-1543364195-077a16c30ff3?w=400',
-                    full: 'https://images.unsplash.com/photo-1543364195-077a16c30ff3?w=1200'
-                },
-                {
-                    id: '3',
-                    thumb: 'https://images.unsplash.com/photo-1502472545332-e24162e39a38?w=400',
-                    full: 'https://images.unsplash.com/photo-1502472545332-e24162e39a38?w=1200'
-                }
-            ]);
+        setGeneratedOptions([]); // Clear previous options
+
+        try {
+            // Generate 3 variations
+            const result = await generateImageWithFal(prompts.fullImagePrompt, '16:9', 3);
+
+            if (result.images && result.images.length > 0) {
+                const options = result.images.map((url, index) => ({
+                    id: `gen-${Date.now()}-${index}`,
+                    thumb: url, // Use same URL for now
+                    full: url
+                }));
+                setGeneratedOptions(options);
+            } else {
+                throw new Error(result.error || 'No images returned');
+            }
+        } catch (error) {
+            console.error('Generation error:', error);
+            alert('Failed to generate images. Please check your credits or try again.');
+        } finally {
             setIsGenerating(false);
-        }, 2000);
+        }
+    };
+
+    // Generate video using Fal.ai (Veo) - UPDATED to use Context
+    const handleGenerateVideo = async () => {
+        if (!activeChapter) return;
+
+        const prompt = prompts?.videoPrompt || `Cinematic concept video for ${activeChapter.title}, ethereal, transformation, butterfly motif`;
+
+        // Fire and forget - the context handles the background job
+        await startVideoGeneration(activeChapter.id, activeChapter.title, prompt);
+
+        // Optional: Alert user that job started
+        // alert('Video generation started in background!');
     };
 
     // Save all generated images to library
@@ -250,8 +269,24 @@ const VisualStudioHome = () => {
             alert('This asset is not associated with a chapter.');
             return;
         }
-        await setAsChapterThumbnail(asset.chapterId, asset.url);
-        await setImageType(asset.id, 'thumbnail');
+
+        // Check if chapter already has a different thumbnail
+        const existingThumbnail = visualAssets.find(a =>
+            a.chapterId === asset.chapterId &&
+            a.imageType === 'thumbnail' &&
+            a.id !== asset.id
+        );
+
+        if (existingThumbnail) {
+            setConfirmModal({
+                show: true,
+                action: 'replace_thumbnail',
+                item: asset
+            });
+            return;
+        }
+
+        await setAsChapterThumbnail(asset.chapterId, asset.id, asset.url);
     };
 
     const handleSetAsHeader = async (asset: VisualAsset) => {
@@ -259,8 +294,52 @@ const VisualStudioHome = () => {
             alert('This asset is not associated with a chapter.');
             return;
         }
-        await setAsChapterHeader(asset.chapterId, asset.url);
-        await setImageType(asset.id, 'header');
+
+        // Check if chapter already has a different header
+        const existingHeader = visualAssets.find(a =>
+            a.chapterId === asset.chapterId &&
+            a.imageType === 'header' &&
+            a.id !== asset.id
+        );
+
+        if (existingHeader) {
+            setConfirmModal({
+                show: true,
+                action: 'replace_header',
+                item: asset
+            });
+            return;
+        }
+
+        await setAsChapterHeader(asset.chapterId, asset.id, asset.url);
+    };
+
+    const handleConfirmAction = async () => {
+        const { action, item } = confirmModal;
+        if (!item) return;
+
+        try {
+            if (action === 'delete') {
+                if (item.type === 'image') {
+                    await deleteImage(item.id);
+                } else {
+                    await deleteVideo(item.id);
+                }
+            } else if (action === 'restore') {
+                await restoreVisualAsset(item.id);
+            } else if (action === 'delete_permanent') {
+                await permanentlyDeleteVisualAsset(item.id);
+            } else if (action === 'replace_thumbnail') {
+                await setAsChapterThumbnail(item.chapterId!, item.id, item.url);
+            } else if (action === 'replace_header') {
+                await setAsChapterHeader(item.chapterId!, item.id, item.url);
+            }
+        } catch (error) {
+            console.error('Action failed:', error);
+            alert('Failed to perform action.');
+        } finally {
+            setConfirmModal({ show: false, action: '', item: null });
+        }
     };
 
     const handleArchive = async (asset: VisualAsset) => {
@@ -279,26 +358,41 @@ const VisualStudioHome = () => {
         }
     };
 
-    const handleDelete = async (asset: VisualAsset) => {
-        if (asset.type === 'image') {
-            await deleteImage(asset.id);
-        } else {
-            await deleteVideo(asset.id);
-        }
-        setConfirmModal({ show: false, action: '', item: null });
-    };
-
     const handleMove = async (asset: VisualAsset, newChapterId: string) => {
         await moveImageToChapter(asset.id, newChapterId);
         setMoveModal({ show: false, item: null });
     };
 
-    const handleDownload = (url: string, filename: string) => {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
+    const handleDownload = async (url: string, filename: string) => {
+        await downloadFile(url, filename);
     };
+
+    /*
+    const handleUpload = async () => {
+        if (!currentUser || !uploadModal.file) return;
+
+        setIsUploading(true);
+        try {
+            const url = await uploadVisualAsset(uploadModal.file, currentUser.uid);
+            const chapterId = uploadModal.chapterId || null;
+            const isVideo = uploadModal.file.type.startsWith('video/');
+
+            if (isVideo) {
+                await saveVideoToLibrary(currentUser.uid, chapterId, url, uploadModal.file.name, 'upload');
+            } else {
+                await saveImageToLibrary(currentUser.uid, chapterId, url, uploadModal.file.name, '', 'generated', 'upload');
+            }
+
+            setUploadModal({ show: false, file: null, chapterId: '' });
+            alert('Upload successful!');
+        } catch (error) {
+            console.error('Upload failed:', error);
+            alert('Failed to upload file.');
+        } finally {
+            setIsUploading(false);
+        }
+    };
+    */
 
     return (
         <div className="page-container" style={{ paddingBottom: '5rem' }}>
@@ -335,6 +429,13 @@ const VisualStudioHome = () => {
                     style={{ padding: '0.75rem 1.5rem', gap: '0.5rem', background: view === 'gallery' ? undefined : 'white' }}
                 >
                     <Sparkles size={18} /> Visual Gallery
+                </button>
+                <button
+                    onClick={() => setView('trash')}
+                    className={`btn ${view === 'trash' ? 'btn-primary' : ''}`}
+                    style={{ padding: '0.75rem 1.5rem', gap: '0.5rem', background: view === 'trash' ? undefined : 'white' }}
+                >
+                    <Trash2 size={18} /> Trash ({trashAssets.length})
                 </button>
             </div>
 
@@ -550,56 +651,207 @@ const VisualStudioHome = () => {
                             <div className="animate-fade-in">
                                 <div className="card" style={{ padding: '2rem' }}>
                                     <h3 className="text-serif" style={{ marginBottom: '1rem' }}>Concept Video Generator</h3>
-                                    <p style={{ color: '#666', marginBottom: '1.5rem' }}>Generate cinematic concept videos that capture the essence of your chapter.</p>
 
-                                    <button
-                                        onClick={() => {
-                                            setIsGeneratingVideo(true);
-                                            setTimeout(() => {
-                                                setGeneratedVideos([
-                                                    { id: '1', url: 'https://example.com/video1.mp4', title: 'The Emergence', thumbnail: 'https://images.unsplash.com/photo-1518173946687-a4c8892bbd9f?w=400' }
-                                                ]);
-                                                setIsGeneratingVideo(false);
-                                            }, 3000);
-                                        }}
-                                        disabled={isGeneratingVideo}
-                                        className="btn btn-primary"
-                                        style={{ width: '100%' }}
-                                    >
-                                        {isGeneratingVideo ? <><Loader2 className="animate-spin" size={18} /> Generating Video...</> : 'Generate Concept Video'}
-                                    </button>
+                                    {!prompts ? (
+                                        <div style={{ textAlign: 'center', padding: '1rem 0' }}>
+                                            <p style={{ color: '#666', marginBottom: '1.5rem' }}>
+                                                Analyze your chapter content to generate a cinematic video prompt.
+                                            </p>
+                                            <button onClick={handleAnalyze} disabled={isAnalyzing} className="btn btn-primary" style={{ width: '100%' }}>
+                                                {isAnalyzing ? <><Loader2 className="animate-spin" size={18} /> Analyzing...</> : 'Analyze & Create Prompts'}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <div style={{ background: '#f9f9f9', padding: '1rem', borderRadius: '0.75rem', marginBottom: '1rem' }}>
+                                                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--color-primary)', marginBottom: '0.5rem' }}>VIDEO PROMPT:</div>
+                                                <div style={{ fontSize: '0.9rem', color: '#666' }}>{prompts.videoPrompt}</div>
+                                            </div>
+                                            <button
+                                                onClick={handleGenerateVideo}
+                                                disabled={isGeneratingForChapter(selectedChapterId)}
+                                                className="btn btn-primary"
+                                                style={{ width: '100%' }}
+                                            >
+                                                {isGeneratingForChapter(selectedChapterId) ? <><Loader2 className="animate-spin" size={18} /> Generating Video (Veo)...</> : 'Generate Concept Video'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
 
-                                {generatedVideos.length > 0 && (
+                                {/* Pending Jobs */}
+                                {/* Existing Chapter Videos */}
+                                <div style={{ marginTop: '3rem' }}>
+                                    <h4 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <PlayCircle size={18} /> Library Videos
+                                    </h4>
+                                    {filteredAssets.filter(a => a.type === 'video' && a.chapterId === selectedChapterId).length > 0 ? (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
+                                            {filteredAssets.filter(a => a.type === 'video' && a.chapterId === selectedChapterId).map(video => (
+                                                <AssetCard
+                                                    key={video.id}
+                                                    asset={video}
+                                                    chapters={chapters}
+                                                    onSetThumbnail={() => handleSetAsThumbnail(video)}
+                                                    onSetHeader={() => handleSetAsHeader(video)}
+                                                    onArchive={() => handleArchive(video)}
+                                                    onUnarchive={() => handleUnarchive(video)}
+                                                    onDelete={() => setConfirmModal({ show: true, action: 'delete', item: video })}
+                                                    onMove={() => setMoveModal({ show: true, item: video })}
+                                                    onDownload={() => handleDownload(video.url, `video-${video.id}.mp4`)}
+                                                    onVideoClick={() => setVideoDetailModal({ show: true, video: video })}
+                                                />
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p style={{ color: '#999', fontStyle: 'italic' }}>No videos saved to library yet.</p>
+                                    )}
+                                </div>
+
+                                {/* Pending Jobs */}
+                                {generationJobs.some(job => job.chapterId === selectedChapterId && job.status === 'generating') && (
                                     <div style={{ marginTop: '2rem' }}>
-                                        <h4 style={{ marginBottom: '1rem' }}>Generated Videos</h4>
-                                        <div style={{ display: 'grid', gap: '1rem' }}>
-                                            {generatedVideos.map(video => (
-                                                <div key={video.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                                    <div style={{ position: 'relative', height: '200px', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                        <img src={video.thumbnail} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }} alt="" />
-                                                        <PlayCircle size={48} color="white" style={{ position: 'absolute' }} />
-                                                    </div>
-                                                    <div style={{ padding: '1rem' }}>
-                                                        <div style={{ fontWeight: 600 }}>{video.title}</div>
-                                                        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                                                            <button className="btn" style={{ flex: 1, padding: '0.5rem' }}><Download size={14} /> Download</button>
-                                                            <button
-                                                                className="btn btn-primary"
-                                                                style={{ flex: 1, padding: '0.5rem' }}
-                                                                onClick={() => currentUser && activeChapter && saveVideoToLibrary(currentUser.uid, activeChapter.id, video.url, video.title)}
-                                                            >
-                                                                Save to Library
-                                                            </button>
+                                        <h4 style={{ marginBottom: '1rem' }}>Generating Now...</h4>
+                                        {generationJobs
+                                            .filter(job => job.chapterId === selectedChapterId && job.status === 'generating')
+                                            .map(job => (
+                                                <div key={job.id} className="card" style={{ marginBottom: '1rem', padding: '2rem', textAlign: 'center', opacity: 0.8 }}>
+                                                    <Loader2 className="animate-spin" size={32} style={{ margin: '0 auto 1rem auto', color: 'var(--color-primary)' }} />
+                                                    <h4>Generating Video...</h4>
+                                                    <p style={{ color: '#666', fontSize: '0.9rem' }}>This may take a minute. You can navigate away safely.</p>
+                                                </div>
+                                            ))
+                                        }
+                                    </div>
+                                )}
+
+                                {/* Completed Jobs (Generated but not saved) */}
+                                {generationJobs.some(job => job.chapterId === selectedChapterId && job.status === 'completed' && job.result) && (
+                                    <div style={{ marginTop: '2rem' }}>
+                                        <h4 style={{ marginBottom: '1rem' }}>Recently Generated (Unsaved)</h4>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
+                                            {generationJobs
+                                                .filter(job => job.chapterId === selectedChapterId && job.status === 'completed' && job.result)
+                                                .map(job => (
+                                                    <div key={job.id} className="card" style={{ padding: 0, overflow: 'hidden', border: '2px solid var(--color-primary)' }}>
+                                                        <div style={{ position: 'relative', height: '200px', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                            onClick={() => setVideoDetailModal({
+                                                                show: true,
+                                                                video: {
+                                                                    url: job.result?.url,
+                                                                    title: `Generated: ${job.chapterTitle}`
+                                                                }
+                                                            })}
+                                                        >
+                                                            {(job.result?.thumbnail && !job.result.thumbnail.endsWith('.mp4') && job.result.thumbnail !== job.result.url) ? (
+                                                                <img src={job.result.thumbnail} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }} alt="" />
+                                                            ) : (
+                                                                <video
+                                                                    src={job.result?.url}
+                                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }}
+                                                                    muted
+                                                                    playsInline
+                                                                    onMouseOver={e => e.currentTarget.play()}
+                                                                    onMouseOut={e => {
+                                                                        e.currentTarget.pause();
+                                                                        e.currentTarget.currentTime = 0;
+                                                                    }}
+                                                                />
+                                                            )}
+                                                            <PlayCircle size={48} color="white" style={{ position: 'absolute', pointerEvents: 'none' }} />
+                                                        </div>
+                                                        <div style={{ padding: '1rem' }}>
+                                                            <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '1rem' }}>{job.chapterTitle}</div>
+                                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                                <button
+                                                                    className="btn btn-primary"
+                                                                    style={{ flex: 1, padding: '0.5rem', fontSize: '0.8rem' }}
+                                                                    onClick={async () => {
+                                                                        if (currentUser && activeChapter && job.result?.url) {
+                                                                            await saveVideoToLibrary(currentUser.uid, activeChapter.id, job.result.url, activeChapter.title);
+                                                                            dismissJob(job.id);
+                                                                            alert('Video saved to library!');
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    Save to Library
+                                                                </button>
+                                                                <button
+                                                                    className="btn"
+                                                                    style={{ padding: '0.5rem', opacity: 0.6 }}
+                                                                    onClick={() => dismissJob(job.id)}
+                                                                    title="Dismiss"
+                                                                >
+                                                                    <X size={16} />
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            ))}
+                                                ))
+                                            }
                                         </div>
                                     </div>
                                 )}
                             </div>
                         )
+                    )}
+
+
+                    {/* Trash View */}
+                    {view === 'trash' && (
+                        <div className="animate-fade-in">
+                            <div className="card" style={{ padding: '2rem', marginBottom: '2rem', textAlign: 'center', background: '#fff5f5', border: '1px solid #fed7d7' }}>
+                                <Trash2 size={32} style={{ margin: '0 auto 1rem auto', color: '#e53e3e' }} />
+                                <h3>Trash Bin</h3>
+                                <p style={{ color: '#666', marginTop: '0.5rem' }}>
+                                    Items in the trash can be restored or permanently deleted.
+                                </p>
+                            </div>
+
+                            {trashAssets.length > 0 ? (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
+                                    {trashAssets.map(asset => (
+                                        <div key={asset.id} className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid #eee' }}>
+                                            <div style={{ position: 'relative', height: '160px', opacity: 0.7, filter: 'grayscale(100%)' }}>
+                                                {asset.type === 'image' ? (
+                                                    <img src={asset.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
+                                                ) : (
+                                                    <div style={{ width: '100%', height: '100%', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                        <PlayCircle size={40} color="white" />
+                                                    </div>
+                                                )}
+                                                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.1)' }}></div>
+                                            </div>
+                                            <div style={{ padding: '1rem' }}>
+                                                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#666', marginBottom: '1rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {asset.title || 'Untitled Asset'}
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                    <button
+                                                        onClick={() => setConfirmModal({ show: true, action: 'restore', item: asset })}
+                                                        className="btn"
+                                                        style={{ flex: 1, color: 'var(--color-primary)', background: '#ebf8ff' }}
+                                                    >
+                                                        <RefreshCw size={14} style={{ marginRight: '0.25rem' }} /> Restore
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setConfirmModal({ show: true, action: 'delete_permanent', item: asset })}
+                                                        className="btn"
+                                                        style={{ flex: 1, color: '#e53e3e', background: '#fff5f5' }}
+                                                    >
+                                                        <Trash2 size={14} style={{ marginRight: '0.25rem' }} /> Delete Forever
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div style={{ textAlign: 'center', padding: '3rem', color: '#999' }}>
+                                    <p>Trash is empty.</p>
+                                </div>
+                            )}
+                        </div>
                     )}
                 </div>
 
@@ -648,9 +900,9 @@ const VisualStudioHome = () => {
                                     cursor: 'pointer'
                                 }}
                             >
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <span style={{ opacity: 0.5 }}>{c.chapterNumber}</span>
-                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>{c.title}</span>
+                                <span style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', textAlign: 'left' }}>
+                                    <span style={{ opacity: 0.5, flexShrink: 0 }}>{c.chapterNumber}</span>
+                                    <span style={{ wordBreak: 'break-word', whiteSpace: 'normal', lineHeight: 1.3 }}>{c.title}</span>
                                 </span>
                                 {getChapterImageCount(c.id) > 0 && (
                                     <span style={{
@@ -671,71 +923,107 @@ const VisualStudioHome = () => {
             </div>
 
             {/* Confirmation Modal */}
-            {confirmModal.show && (
-                <div className="modal-overlay" onClick={() => setConfirmModal({ show: false, action: '', item: null })}>
-                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-                        <h3 style={{ marginBottom: '1rem' }}>Confirm Delete</h3>
-                        <p style={{ color: '#666', marginBottom: '1.5rem' }}>Are you sure you want to delete this {confirmModal.item?.type}? This action cannot be undone.</p>
-                        <div style={{ display: 'flex', gap: '1rem' }}>
-                            <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmModal({ show: false, action: '', item: null })}>Cancel</button>
-                            <button className="btn" style={{ flex: 1, background: '#ef4444', color: 'white' }} onClick={() => handleDelete(confirmModal.item)}>Delete</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Move Modal */}
-            {moveModal.show && (
-                <div className="modal-overlay" onClick={() => setMoveModal({ show: false, item: null })}>
-                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-                        <h3 style={{ marginBottom: '1rem' }}>Move to Chapter</h3>
-                        <p style={{ color: '#666', marginBottom: '1rem' }}>Select a chapter to move this image to:</p>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                            {chapters.map(c => (
+            {
+                confirmModal.show && (
+                    <div className="modal-overlay" onClick={() => setConfirmModal({ show: false, action: '', item: null })}>
+                        <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+                            <h3 style={{ marginBottom: '1rem' }}>
+                                {confirmModal.action === 'delete' ? 'Move to Trash'
+                                    : confirmModal.action === 'delete_permanent' ? 'Delete Forever'
+                                        : confirmModal.action === 'restore' ? 'Restore Item'
+                                            : 'Confirm Replacement'}
+                            </h3>
+                            <p style={{ color: '#666', marginBottom: '1.5rem' }}>
+                                {confirmModal.action === 'delete'
+                                    ? `Are you sure you want to move this ${confirmModal.item?.type} to the trash? You can restore it later.`
+                                    : confirmModal.action === 'delete_permanent'
+                                        ? "Are you sure you want to PERMANENTLY delete this? This action cannot be undone."
+                                        : confirmModal.action === 'restore'
+                                            ? "Restore this item to the library?"
+                                            : confirmModal.action === 'replace_thumbnail'
+                                                ? "This chapter already has a thumbnail. Do you want to replace it?"
+                                                : "This chapter already has a header image. Do you want to replace it?"
+                                }
+                            </p>
+                            <div style={{ display: 'flex', gap: '1rem' }}>
+                                <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmModal({ show: false, action: '', item: null })}>Cancel</button>
                                 <button
-                                    key={c.id}
                                     className="btn"
-                                    style={{ justifyContent: 'flex-start', background: c.id === moveModal.item?.chapterId ? 'var(--color-hover)' : 'white' }}
-                                    onClick={() => handleMove(moveModal.item, c.id)}
+                                    style={{ flex: 1, background: confirmModal.action.includes('delete') ? '#ef4444' : 'var(--color-primary)', color: 'white' }}
+                                    onClick={handleConfirmAction}
                                 >
-                                    Ch {c.chapterNumber}: {c.title}
-                                </button>
-                            ))}
-                        </div>
-                        <button className="btn" style={{ width: '100%' }} onClick={() => setMoveModal({ show: false, item: null })}>Cancel</button>
-                    </div>
-                </div>
-            )}
-
-            {/* Video Detail Modal */}
-            {videoDetailModal.show && (
-                <div className="modal-overlay" onClick={() => setVideoDetailModal({ show: false, video: null })}>
-                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px', padding: 0 }}>
-                        <button
-                            onClick={() => setVideoDetailModal({ show: false, video: null })}
-                            style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: '50%', padding: '0.5rem', cursor: 'pointer', zIndex: 10 }}
-                        >
-                            <X size={20} color="white" />
-                        </button>
-                        <div style={{ background: '#000', height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <PlayCircle size={64} color="white" />
-                        </div>
-                        <div style={{ padding: '1.5rem' }}>
-                            <h3>{videoDetailModal.video?.title || 'Video'}</h3>
-                            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                                <button className="btn" style={{ flex: 1 }}><Download size={16} /> Download</button>
-                                <button className="btn" style={{ flex: 1, background: '#ef4444', color: 'white' }} onClick={() => {
-                                    setConfirmModal({ show: true, action: 'delete', item: videoDetailModal.video });
-                                    setVideoDetailModal({ show: false, video: null });
-                                }}>
-                                    <Trash2 size={16} /> Delete
+                                    {confirmModal.action === 'delete' ? 'Move to Trash'
+                                        : confirmModal.action === 'delete_permanent' ? 'Delete Forever'
+                                            : confirmModal.action === 'restore' ? 'Restore'
+                                                : 'Replace'}
                                 </button>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+
+            {/* Move Modal */}
+            {
+                moveModal.show && (
+                    <div className="modal-overlay" onClick={() => setMoveModal({ show: false, item: null })}>
+                        <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+                            <h3 style={{ marginBottom: '1rem' }}>Move to Chapter</h3>
+                            <p style={{ color: '#666', marginBottom: '1rem' }}>Select a chapter to move this image to:</p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                                {chapters.map(c => (
+                                    <button
+                                        key={c.id}
+                                        className="btn"
+                                        style={{ justifyContent: 'flex-start', background: c.id === moveModal.item?.chapterId ? 'var(--color-hover)' : 'white' }}
+                                        onClick={() => handleMove(moveModal.item, c.id)}
+                                    >
+                                        Ch {c.chapterNumber}: {c.title}
+                                    </button>
+                                ))}
+                            </div>
+                            <button className="btn" style={{ width: '100%' }} onClick={() => setMoveModal({ show: false, item: null })}>Cancel</button>
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* Video Detail Modal */}
+            {
+                videoDetailModal.show && (
+                    <div className="modal-overlay" onClick={() => setVideoDetailModal({ show: false, video: null })}>
+                        <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px', padding: 0 }}>
+                            <button
+                                onClick={() => setVideoDetailModal({ show: false, video: null })}
+                                style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'rgba(0,0,0,0.5)', border: 'none', borderRadius: '50%', padding: '0.5rem', cursor: 'pointer', zIndex: 10 }}
+                            >
+                                <X size={20} color="white" />
+                            </button>
+                            <div style={{ background: '#000', width: '100%', height: 'auto', maxHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <video
+                                    src={videoDetailModal.video?.url}
+                                    controls
+                                    autoPlay
+                                    style={{ width: '100%', height: '100%', maxHeight: '60vh', objectFit: 'contain' }}
+                                />
+                            </div>
+                            <div style={{ padding: '1.5rem' }}>
+                                <h3>{videoDetailModal.video?.title || 'Video'}</h3>
+                                <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                                    <button className="btn" style={{ flex: 1 }}><Download size={16} /> Download</button>
+                                    <button className="btn" style={{ flex: 1, background: '#ef4444', color: 'white' }} onClick={() => {
+                                        setConfirmModal({ show: true, action: 'delete', item: videoDetailModal.video });
+                                        setVideoDetailModal({ show: false, video: null });
+                                    }}>
+                                        <Trash2 size={16} /> Delete
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+        </div >
     );
 };
 
@@ -759,7 +1047,23 @@ const AssetCard = ({ asset, chapters, onSetThumbnail, onSetHeader, onArchive, on
                     <img src={asset.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
                 ) : (
                     <div style={{ width: '100%', height: '100%', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <PlayCircle size={40} color="white" />
+                        {/* Try to show video thumbnail if available and not the video itself, otherwise show video element */}
+                        {(asset.url && !asset.url.endsWith('.jpg') && !asset.url.endsWith('.png') && !asset.url.endsWith('.webp')) ? (
+                            <video
+                                src={asset.url}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }}
+                                muted
+                                playsInline
+                                onMouseOver={e => e.currentTarget.play()}
+                                onMouseOut={e => {
+                                    e.currentTarget.pause();
+                                    e.currentTarget.currentTime = 0;
+                                }}
+                            />
+                        ) : (
+                            <img src={asset.url} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 }} alt="" />
+                        )}
+                        <PlayCircle size={40} color="white" style={{ position: 'absolute', pointerEvents: 'none' }} />
                     </div>
                 )}
 

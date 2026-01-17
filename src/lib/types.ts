@@ -20,6 +20,9 @@ export interface Chapter {
     thumbnailUrl?: string;
     fullImageUrl?: string;
     conceptVideos?: { url: string; title: string; type: string }[];
+    // Soft delete fields
+    deleted?: boolean;
+    deletedAt?: Timestamp;
 }
 
 export interface TikTokScript {

@@ -1,7 +1,7 @@
 import { fal } from "@fal-ai/client";
 
 // Initialize FAL with the key from environment
-// NOTE: In a production app, this should be proxied to keep the key secret.
+// NOTE: Using direct credentials until proxy is properly deployed
 fal.config({
     credentials: import.meta.env.VITE_FAL_KEY,
 });

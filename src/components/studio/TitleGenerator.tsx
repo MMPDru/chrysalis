@@ -40,6 +40,24 @@ const TitleGenerator = ({ chapterId, chapterContent, currentTitle, onTitleSelect
 
     return (
         <div className="card" style={{ padding: '1.5rem' }}>
+            {/* Current Title Display */}
+            {currentTitle && (
+                <div style={{
+                    marginBottom: '1rem',
+                    padding: '0.75rem 1rem',
+                    background: 'var(--color-hover)',
+                    borderRadius: '0.5rem',
+                    borderLeft: '3px solid var(--color-primary)'
+                }}>
+                    <div style={{ fontSize: '0.7rem', color: '#999', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
+                        Current Title
+                    </div>
+                    <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-primary)' }}>
+                        {currentTitle}
+                    </div>
+                </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <h3 className="text-serif" style={{ margin: 0, fontSize: '1.2rem' }}>Chapter Title Generator</h3>
                 <button

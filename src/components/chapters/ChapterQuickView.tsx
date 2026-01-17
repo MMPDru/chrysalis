@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { X, ExternalLink, History, Wand2 } from 'lucide-react';
+import { X, ExternalLink, History, Wand2, Trash2 } from 'lucide-react';
 import type { Chapter, Version } from '../../lib/types';
-import { fetchLatestVersion } from '../../lib/chapters';
+import { fetchLatestVersion, softDeleteChapter } from '../../lib/chapters';
 
 interface ChapterQuickViewProps {
     chapter: Chapter | null;
@@ -14,6 +14,8 @@ interface ChapterQuickViewProps {
 const ChapterQuickView = ({ chapter, onClose, onOpenEditor, onViewVersions, onEnhance }: ChapterQuickViewProps) => {
     const [version, setVersion] = useState<Version | null>(null);
     const [loading, setLoading] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         if (chapter) {
@@ -24,6 +26,21 @@ const ChapterQuickView = ({ chapter, onClose, onOpenEditor, onViewVersions, onEn
             });
         }
     }, [chapter]);
+
+    const handleDelete = async () => {
+        if (!chapter) return;
+        setIsDeleting(true);
+        try {
+            await softDeleteChapter(chapter.id);
+            onClose();
+        } catch (error) {
+            console.error('Failed to delete chapter:', error);
+            alert('Failed to delete chapter. Please try again.');
+        } finally {
+            setIsDeleting(false);
+            setShowDeleteConfirm(false);
+        }
+    };
 
     if (!chapter) return null;
 
@@ -78,7 +95,7 @@ const ChapterQuickView = ({ chapter, onClose, onOpenEditor, onViewVersions, onEn
                     </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '1rem' }}>
+                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
                     <button
                         className="btn btn-primary"
                         style={{ flex: 1 }}
@@ -104,6 +121,57 @@ const ChapterQuickView = ({ chapter, onClose, onOpenEditor, onViewVersions, onEn
                         Chrysalis Enhancement
                     </button>
                 </div>
+
+                {/* Delete Section */}
+                {!showDeleteConfirm ? (
+                    <button
+                        className="btn"
+                        style={{
+                            width: '100%',
+                            background: 'transparent',
+                            color: '#dc2626',
+                            border: '1px solid #fecaca',
+                            marginTop: '0.5rem'
+                        }}
+                        onClick={() => setShowDeleteConfirm(true)}
+                    >
+                        <Trash2 size={18} />
+                        Move to Trash
+                    </button>
+                ) : (
+                    <div style={{
+                        background: '#fef2f2',
+                        border: '1px solid #fecaca',
+                        borderRadius: '0.5rem',
+                        padding: '1rem',
+                        marginTop: '0.5rem'
+                    }}>
+                        <p style={{ margin: '0 0 1rem 0', color: '#dc2626', fontWeight: 500 }}>
+                            Are you sure you want to move this chapter to trash?
+                        </p>
+                        <p style={{ margin: '0 0 1rem 0', fontSize: '0.875rem', color: '#666' }}>
+                            The chapter can be restored from the Dashboard later. Images and videos will remain in your library.
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button
+                                className="btn"
+                                style={{ flex: 1, background: '#dc2626', color: 'white' }}
+                                onClick={handleDelete}
+                                disabled={isDeleting}
+                            >
+                                {isDeleting ? 'Deleting...' : 'Yes, Move to Trash'}
+                            </button>
+                            <button
+                                className="btn"
+                                style={{ flex: 1 }}
+                                onClick={() => setShowDeleteConfirm(false)}
+                                disabled={isDeleting}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

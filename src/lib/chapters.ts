@@ -23,13 +23,18 @@ export const subscribeToChapters = (userId: string, callback: (chapters: Chapter
     );
 
     return onSnapshot(q, (snapshot) => {
-        const chapters = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        })) as Chapter[];
+        const chapters = snapshot.docs
+            .map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })) as Chapter[];
+
+        // Filter out deleted chapters (client-side to avoid index requirement)
+        const activeChapters = chapters.filter(ch => !ch.deleted);
+
         // Sort client-side to avoid requiring Firestore index
-        chapters.sort((a, b) => (a.chapterNumber || 0) - (b.chapterNumber || 0));
-        callback(chapters);
+        activeChapters.sort((a, b) => (a.chapterNumber || 0) - (b.chapterNumber || 0));
+        callback(activeChapters);
     }, (error) => {
         console.error('Error subscribing to chapters:', error);
         callback([]);
@@ -275,5 +280,84 @@ export const updateButterflyAnalogy = async (chapterId: string, analogy: string,
         butterflyAnalogy: analogy,
         butterflyStage: stage,
         lastEdited: serverTimestamp()
+    });
+};
+
+// ========== CHAPTER TRASH/ARCHIVE FUNCTIONS ==========
+
+/**
+ * Soft delete a chapter (move to trash)
+ * The chapter and its versions are preserved but hidden from the main list
+ */
+export const softDeleteChapter = async (chapterId: string) => {
+    const chapterRef = doc(db, 'chapters', chapterId);
+    await updateDoc(chapterRef, {
+        deleted: true,
+        deletedAt: serverTimestamp()
+    });
+};
+
+/**
+ * Restore a chapter from trash
+ */
+export const restoreChapter = async (chapterId: string) => {
+    const chapterRef = doc(db, 'chapters', chapterId);
+    await updateDoc(chapterRef, {
+        deleted: false,
+        deletedAt: null
+    });
+};
+
+/**
+ * Permanently delete a chapter and ALL its versions
+ * WARNING: This is irreversible!
+ */
+export const permanentlyDeleteChapter = async (chapterId: string) => {
+    const batch = writeBatch(db);
+
+    // Delete all versions for this chapter
+    const versionsQuery = query(collection(db, 'versions'), where('chapterId', '==', chapterId));
+    const versionsSnapshot = await getDocs(versionsQuery);
+    versionsSnapshot.docs.forEach(docSnap => {
+        batch.delete(docSnap.ref);
+    });
+
+    // Delete the chapter document
+    const chapterRef = doc(db, 'chapters', chapterId);
+    batch.delete(chapterRef);
+
+    await batch.commit();
+};
+
+/**
+ * Subscribe to deleted/trashed chapters only
+ */
+export const subscribeToDeletedChapters = (userId: string, callback: (chapters: Chapter[]) => void) => {
+    const q = query(
+        collection(db, 'chapters'),
+        where('userId', '==', userId)
+    );
+
+    return onSnapshot(q, (snapshot) => {
+        const chapters = snapshot.docs
+            .map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })) as Chapter[];
+
+        // Filter to ONLY deleted chapters (client-side to avoid index requirement)
+        const deletedChapters = chapters.filter(ch => ch.deleted === true);
+
+        // Sort by deletion time (newest first)
+        deletedChapters.sort((a, b) => {
+            const aTime = a.deletedAt?.seconds || 0;
+            const bTime = b.deletedAt?.seconds || 0;
+            return bTime - aTime;
+        });
+
+        callback(deletedChapters);
+    }, (error) => {
+        console.error('Error subscribing to deleted chapters:', error);
+        callback([]);
     });
 };
