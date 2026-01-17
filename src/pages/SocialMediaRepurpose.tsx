@@ -22,7 +22,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { subscribeToChapters, fetchLatestVersion } from '../lib/chapters';
-import { generateVideoWithFal } from '../lib/fal';
 import {
     savePostToLibrary,
     saveImageToSocialLibrary,
@@ -763,42 +762,9 @@ const SocialMediaRepurpose = () => {
         }
 
         try {
-            // VIDEO: Use Fal.ai with Veo 3 directly (bypasses n8n entirely)
-            if (type === 'Video') {
-                console.log('Generating video with Fal.ai Veo 3...');
-                console.log('Video prompt:', generatedVideoScene);
-
-                // Use 9:16 for social media (TikTok/Reels/Shorts format)
-                const result = await generateVideoWithFal(generatedVideoScene, 8, '9:16');
-
-                if (result.status === 'completed' && result.videoUrl) {
-                    console.log('Video generated successfully:', result.videoUrl);
-                    setVideoResults({
-                        videoUrl: result.videoUrl,
-                        videoPrompt: generatedVideoScene,
-                        posts: {}
-                    });
-                    setActiveResultTab('videos');
-                    setShowResults(true);
-
-                    // Add to history
-                    setHistory(prev => [{
-                        id: Date.now().toString(),
-                        timestamp: new Date(),
-                        chapterTitle: selectedChapter?.title || 'Unknown',
-                        type: 'Video',
-                        status: 'complete',
-                        payload: payload
-                    }, ...prev.slice(0, 9)]);
-                } else {
-                    throw new Error(result.error || 'Video generation failed');
-                }
-                return; // Exit early for videos
-            }
-
-            // POSTS & IMAGES: Use n8n webhook
+            // All requests go through n8n webhook
             const controller = new AbortController();
-            const timeoutMs = 120000; // 2 mins for posts/images
+            const timeoutMs = type === 'Video' ? 300000 : 120000; // 5 mins for video, 2 mins for posts/images
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             console.log(`Sending ${type} request to n8n:`, payload);
@@ -887,6 +853,23 @@ const SocialMediaRepurpose = () => {
                     setPostResults(parsed.posts);
                 }
                 setActiveResultTab('images');
+            } else if (type === 'Video') {
+                // Handle video response from n8n - expects { videoUrl: string }
+                const videoData = data as { videoUrl?: string; video_url?: string; url?: string };
+                const videoUrl = videoData.videoUrl || videoData.video_url || videoData.url;
+
+                if (videoUrl) {
+                    console.log('Video URL from n8n:', videoUrl);
+                    setVideoResults({
+                        videoUrl: videoUrl,
+                        videoPrompt: generatedVideoScene,
+                        posts: {}
+                    });
+                    setActiveResultTab('videos');
+                } else {
+                    console.error('No video URL in response:', data);
+                    throw new Error('No video URL returned from n8n');
+                }
             }
 
             setShowResults(true);
@@ -1111,42 +1094,9 @@ const SocialMediaRepurpose = () => {
         }));
 
         try {
-            // VIDEO: Use Fal.ai with Veo 3 directly (bypasses n8n entirely)
-            if (type === 'Video') {
-                console.log('Retrying video with Fal.ai Veo 3...');
-                const videoPrompt = historyItem.payload.video_scene || historyItem.payload.content || '';
-
-                const result = await generateVideoWithFal(videoPrompt, 8, '9:16');
-
-                if (result.status === 'completed' && result.videoUrl) {
-                    console.log('Video retry successful:', result.videoUrl);
-                    setVideoResults({
-                        videoUrl: result.videoUrl,
-                        videoPrompt: videoPrompt,
-                        posts: {}
-                    });
-                    setActiveResultTab('videos');
-                    setShowResults(true);
-
-                    setHistory(prev => prev.map(h =>
-                        h.id === historyItem.id
-                            ? { ...h, status: 'complete' as const, errorMessage: undefined }
-                            : h
-                    ));
-                } else {
-                    throw new Error(result.error || 'Video generation failed');
-                }
-
-                setIsLoading(prev => ({
-                    ...prev,
-                    videos: false
-                }));
-                return;
-            }
-
-            // POSTS & IMAGES: Use n8n
+            // All retries go through n8n
             const controller = new AbortController();
-            const timeoutMs = 120000; // 2 mins for posts/images
+            const timeoutMs = type === 'Video' ? 300000 : 120000; // 5 mins for video, 2 mins for others
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             console.log(`Retrying ${type} request:`, historyItem.payload);
@@ -1167,7 +1117,7 @@ const SocialMediaRepurpose = () => {
                 throw new Error(`Webhook error: ${response.status}`);
             }
 
-            // Handle response (same logic as sendToN8N)
+            // Handle response
             const contentType = response.headers.get('content-type') || '';
             let data: unknown;
 
@@ -1206,6 +1156,19 @@ const SocialMediaRepurpose = () => {
                     setImageResults(parsed);
                 }
                 setActiveResultTab('images');
+            } else if (type === 'Video') {
+                const videoData = data as { videoUrl?: string; video_url?: string; url?: string };
+                const videoUrl = videoData.videoUrl || videoData.video_url || videoData.url;
+                if (videoUrl) {
+                    setVideoResults({
+                        videoUrl: videoUrl,
+                        videoPrompt: historyItem.payload.video_scene || '',
+                        posts: {}
+                    });
+                    setActiveResultTab('videos');
+                } else {
+                    throw new Error('No video URL in response');
+                }
             }
 
             setShowResults(true);
